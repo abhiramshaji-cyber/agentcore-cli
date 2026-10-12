@@ -284,15 +284,14 @@ describe("project add config-bundle wizard", () => {
     screen.unmount();
   });
 
-  test("validates the deployed name against the longest project target", async () => {
+  test("validates the concatenated project and bundle name", async () => {
     const projectRoot = await inProject();
     await writeFile(
       join(projectRoot, "agentcore", "aws-targets.json"),
       JSON.stringify([{ name: "production", account: "111122223333", region: "us-east-1" }]),
     );
-    // 78 characters: legal on its own, one over once the project and the target
-    // are prefixed.
-    const name = `c${"x".repeat(77)}`;
+
+    const name = `c${"x".repeat(89)}`;
     const screen = renderScreen("/agentcore/add/config-bundle");
 
     await waitForText(screen.lastFrame, "what should this configuration bundle be called?");
@@ -301,8 +300,20 @@ describe("project add config-bundle wizard", () => {
 
     await waitForFlatText(screen.lastFrame, "is 101 characters. The maximum is 100.");
     const frame = flatFrame(screen.lastFrame);
-    expect(frame).toContain("TestProject_production_");
+    expect(frame).toContain("Configuration bundle deployed name 'TestProjectc");
     expect(frame).toContain("what should this configuration bundle be called?");
+    screen.unmount();
+  });
+
+  test("allows a bundle name that fits without the target prefix", async () => {
+    const projectRoot = await inProject();
+    await writeFile(
+      join(projectRoot, "agentcore", "aws-targets.json"),
+      JSON.stringify([{ name: "production", account: "111122223333", region: "us-east-1" }]),
+    );
+    const screen = renderScreen("/agentcore/add/config-bundle");
+
+    await reachComponentsStep(screen, `c${"x".repeat(88)}`);
     screen.unmount();
   });
 

@@ -1257,6 +1257,17 @@ describe("project add config-bundle", () => {
     await expect(run(args)).rejects.toBeInstanceOf(InputValidationError);
   });
 
+  test("accepts a configuration bundle name at the 100-character deployed limit", async () => {
+    const { projectRoot, cleanup } = await initProject();
+    cleanups.push(cleanup);
+    const name = `c${"x".repeat(88)}`;
+
+    await run(["add", "config-bundle", "--name", name, "--components", JSON.stringify(components)]);
+
+    const spec = await Bun.file(join(projectRoot, "agentcore", "agentcore.json")).json();
+    expect(spec.configBundles[0].name).toBe(name);
+  });
+
   test.each<[string, string[], string?]>([
     [
       "missing name",
@@ -1271,8 +1282,8 @@ describe("project add config-bundle", () => {
     ["invalid name", ["--name", "orders-config", "--components", JSON.stringify(components)]],
     [
       "a deployed name over the 100-character service limit",
-      ["--name", `c${"x".repeat(80)}`, "--components", JSON.stringify(components)],
-      `Configuration bundle deployed name 'TestProject_default_c${"x".repeat(80)}' is 101 characters. The maximum is 100.`,
+      ["--name", `c${"x".repeat(89)}`, "--components", JSON.stringify(components)],
+      `Configuration bundle deployed name 'TestProjectc${"x".repeat(89)}' is 101 characters. The maximum is 100.`,
     ],
     ["empty components", ["--name", "OrdersConfig", "--components", "{}"]],
     [

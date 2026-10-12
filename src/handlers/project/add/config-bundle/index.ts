@@ -1,7 +1,6 @@
 import z from "zod";
 import { InputValidationError } from "../../../../errors";
 import { SourceResolver } from "../../../../io";
-import type { AwsDeploymentTarget } from "../../../../projectSchemas/aws-targets";
 import {
   ComponentConfigurationSchema,
   ConfigBundleBranchNameSchema,
@@ -15,7 +14,7 @@ import { formatZodError } from "../../../../router/schema";
 import { parseJsonFlag } from "../../../utils";
 import type { AddResourceInput, Project } from "../../types";
 import type { AddProjectResourceConfig } from "../types";
-import { addProjectResource, requireDeployedNameFits, addDescription } from "../shared";
+import { addProjectResource, addDescription } from "../shared";
 
 // ComponentsSchema is the shape --components accepts. The wizard's components
 // step validates against it too, rather than a copy of it.
@@ -40,15 +39,23 @@ export type ConfigBundleInput = {
   kmsKeyArn?: string;
 };
 
+/** Config bundles keep the v0 physical name without a separator or target. */
+export function requireConfigBundleNameFits(projectName: string, name: string): void {
+  const deployed = `${projectName}${name}`;
+  if (deployed.length <= 100) return;
+  throw new InputValidationError(
+    `Configuration bundle deployed name '${deployed}' is ${deployed.length} characters. The maximum is 100. The deployed name is <project><name>. Shorten the configuration bundle name.`,
+  );
+}
+
 // toAddConfigBundleInput is the one place a configuration bundle is built from
 // user input, so the flags and the wizard cannot disagree about what a bundle
 // is, what it defaults to, or how a deployed name is bounded.
 export function toAddConfigBundleInput(
   project: Project,
-  targets: readonly AwsDeploymentTarget[],
   input: ConfigBundleInput,
 ): AddResourceInput {
-  requireDeployedNameFits("Configuration bundle", project.name, input.name, "_", 100, targets);
+  requireConfigBundleNameFits(project.name, input.name);
   const components = ComponentsSchema.safeParse(input.components);
   if (!components.success) {
     throw new InputValidationError(
@@ -112,18 +119,14 @@ export const createAddConfigBundleHandler = (config: AddProjectResourceConfig) =
         "components",
         await source.resolveText("components", flags.components),
       );
-      const input = toAddConfigBundleInput(
-        project,
-        await config.projectManager.listTargets(project),
-        {
-          name: flags.name,
-          components,
-          description: flags.description,
-          branchName: flags["branch-name"],
-          commitMessage: flags["commit-message"],
-          kmsKeyArn: flags["kms-key-arn"],
-        },
-      );
+      const input = toAddConfigBundleInput(project, {
+        name: flags.name,
+        components,
+        description: flags.description,
+        branchName: flags["branch-name"],
+        commitMessage: flags["commit-message"],
+        kmsKeyArn: flags["kms-key-arn"],
+      });
 
       await addProjectResource(
         ctx,

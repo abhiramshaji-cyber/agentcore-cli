@@ -9,7 +9,6 @@ import {
   TextField,
   Wizard,
 } from "../../../../components/wizard";
-import type { AwsDeploymentTarget } from "../../../../projectSchemas/aws-targets";
 import {
   ConfigBundleBranchNameSchema,
   ConfigBundleCommitMessageSchema,
@@ -18,11 +17,11 @@ import {
 import { ProjectKey } from "../../../../router";
 import type { ScreenProps } from "../../../types";
 import type { Project } from "../../types";
-import { LoadingFrame, ProjectGate, projectQueryKey, useProjectTargets } from "../../ProjectGate";
-import { requireDeployedNameFits } from "../shared";
+import { ProjectGate, projectQueryKey } from "../../ProjectGate";
 import {
   ComponentsSchema,
   DEFAULT_BRANCH_NAME,
+  requireConfigBundleNameFits,
   toAddConfigBundleInput,
   type ConfigBundleInput,
 } from "./index";
@@ -97,49 +96,18 @@ export function AddConfigBundleScreen({ ctx, core }: ScreenProps) {
       onBack={() => navigate(ADD_MENU)}
     >
       {(project) => (
-        <AddConfigBundleLoader project={project} core={core} region={ctx.value(RegionKey)} />
+        <AddConfigBundleWizard project={project} core={core} region={ctx.value(RegionKey)} />
       )}
     </ProjectGate>
   );
 }
 
-function AddConfigBundleLoader({
-  project,
-  core,
-  region,
-}: {
-  project: Project;
-  core: ScreenProps["core"];
-  region: string | undefined;
-}) {
-  const navigate = useNavigate();
-  const targets = useProjectTargets(core, project);
-
-  if (targets.data !== undefined) {
-    return (
-      <AddConfigBundleWizard project={project} targets={targets.data} core={core} region={region} />
-    );
-  }
-
-  return (
-    <LoadingFrame
-      breadcrumb={BREADCRUMB}
-      description={DESCRIPTION}
-      query={targets}
-      loadingLabel="loading deployment targets…"
-      onBack={() => navigate(ADD_MENU)}
-    />
-  );
-}
-
 function AddConfigBundleWizard({
   project,
-  targets,
   core,
   region,
 }: {
   project: Project;
-  targets: readonly AwsDeploymentTarget[];
   core: ScreenProps["core"];
   /** The command\'s resolved region, for the China gate of a project without targets. */
   region: string | undefined;
@@ -155,13 +123,12 @@ function AddConfigBundleWizard({
   const set = (update: Partial<ConfigBundleFormValues>) =>
     setValues((current) => ({ ...current, ...update }));
 
-  // The deployed name is <project>_<target>_<name> and must fit the service
-  // cap, so the live check reports the real budget rather than the schema's.
+  // The deployed name is <project><name> and must fit the service cap.
   const nameSchema = useMemo(
     () =>
       ConfigBundleNameSchema.superRefine((name, ctx) => {
         try {
-          requireDeployedNameFits("Configuration bundle", project.name, name, "_", 100, targets);
+          requireConfigBundleNameFits(project.name, name);
         } catch (error) {
           ctx.addIssue({
             code: "custom",
@@ -169,7 +136,7 @@ function AddConfigBundleWizard({
           });
         }
       }),
-    [project.name, targets],
+    [project.name],
   );
 
   return (
@@ -180,7 +147,7 @@ function AddConfigBundleWizard({
       onSubmit={async function* () {
         const updated = yield* core.projectManager.addResource(
           project,
-          toAddConfigBundleInput(project, targets, toConfigBundleInput(values)),
+          toAddConfigBundleInput(project, toConfigBundleInput(values)),
           { region },
         );
         queryClient.setQueryData(projectQueryKey(), updated);
@@ -195,7 +162,7 @@ function AddConfigBundleWizard({
       <Step stepKey="name" prompt="what should this configuration bundle be called?">
         <TextField
           label="Bundle name"
-          help="letters, digits and underscores, starting with a letter; the deployed <project>_<target>_<name> must fit 100 characters"
+          help="letters, digits and underscores, starting with a letter; the deployed <project><name> must fit 100 characters"
           placeholder="runtime_config"
           value={values.name}
           onChange={(name) => set({ name })}
