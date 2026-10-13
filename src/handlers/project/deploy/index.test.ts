@@ -4,12 +4,16 @@ import { join } from "node:path";
 import { UserCancellationError } from "../../../errors/errors";
 import { createRootHandler } from "../../index";
 import { DEFAULT_GLOBAL_CONFIG } from "../../../globalConfig";
+import { ValueContext } from "../../../router";
 import {
+  assertMetricEmitted,
   createSilentLogger,
+  getTestTelemetryClient,
   initProject,
   TestCoreClient,
   TestGlobalConfigAccessor,
   testIO,
+  withTelemetry,
 } from "../../../testing";
 import type { DeployBackendInput, ProjectBackend } from "../../../core/project";
 import type { AwsDeploymentTarget } from "../../../projectSchemas/aws-targets";
@@ -87,7 +91,7 @@ type TestDeployOptions = {
   transactionSearch?: boolean;
 };
 
-function testDeployCommand(
+async function testDeployCommand(
   result: DeployResult,
   events: ProjectEvent[] = [],
   options: TestDeployOptions = {},
@@ -98,25 +102,33 @@ function testDeployCommand(
     backends: { CDK: fake.backend },
     resolveAccount: options.resolveAccount,
   });
+  const logger = createSilentLogger();
+  const globalConfigAccessor = new TestGlobalConfigAccessor(
+    options.transactionSearch === undefined
+      ? undefined
+      : {
+          initialConfigData: {
+            ...DEFAULT_GLOBAL_CONFIG,
+            transactionSearch: options.transactionSearch,
+          },
+        },
+  );
+  const { client, filePath, cleanup } = await getTestTelemetryClient();
+  cleanups.push(cleanup);
   const root = createRootHandler(core, {
     io: io.io,
-    globalConfigAccessor: new TestGlobalConfigAccessor(
-      options.transactionSearch === undefined
-        ? undefined
-        : {
-            initialConfigData: {
-              ...DEFAULT_GLOBAL_CONFIG,
-              transactionSearch: options.transactionSearch,
-            },
-          },
-    ),
-    logger: createSilentLogger(),
+    globalConfigAccessor,
+    logger,
   });
 
   return {
     ...fake,
     io,
-    run: (args: string[] = []) => root.route(["node", "agentcore", "deploy", ...args]),
+    telemetryFilePath: filePath,
+    run: async (args: string[] = []) =>
+      withTelemetry(ValueContext.EmptyContext(), client, (ctx) =>
+        root.route(["node", "agentcore", "deploy", ...args], ctx),
+      ),
   };
 }
 
@@ -183,7 +195,7 @@ describe("project deploy handler", () => {
   );
 
   test("defaults to the default target and keeps progress off stdout", async () => {
-    const subject = testDeployCommand(
+    const subject = await testDeployCommand(
       { outputs: { ZetaUrl: "https://zeta.example", AlphaArn: "arn:alpha" } },
       [
         { type: "step", message: "Preparing deployment" },
@@ -195,6 +207,14 @@ describe("project deploy handler", () => {
 
     await subject.run();
 
+    await assertMetricEmitted(subject.telemetryFilePath, "cli.command_run", {
+      command_path: "/agentcore/deploy",
+      exit_reason: "success",
+      project_runtime_count: 0,
+      project_memory_count: 0,
+      project_gateway_count: 0,
+      project_harness_count: 1,
+    });
     expect(subject.calls).toHaveLength(1);
     expect(subject.calls[0]?.input.target).toEqual(DEFAULT_TARGET);
     expect(subject.io.stderr()).toContain("Preparing deployment\nDeploying stack");
@@ -207,12 +227,12 @@ describe("project deploy handler", () => {
   });
 
   test("passes the global config's transactionSearch flag into the deploy", async () => {
-    const enabled = testDeployCommand({ outputs: {} });
+    const enabled = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets();
     await enabled.run();
     expect(enabled.calls[0]?.input.transactionSearch).toBe(true);
 
-    const disabled = testDeployCommand({ outputs: {} }, [], { transactionSearch: false });
+    const disabled = await testDeployCommand({ outputs: {} }, [], { transactionSearch: false });
     await inProjectWithTargets();
     await disabled.run();
     expect(disabled.calls[0]?.input.transactionSearch).toBe(false);
@@ -220,7 +240,7 @@ describe("project deploy handler", () => {
 
   test("passes an explicit target and renders the result as JSON", async () => {
     const result = { outputs: { ServiceUrl: "https://service.example" } };
-    const subject = testDeployCommand(result);
+    const subject = await testDeployCommand(result);
     await inProjectWithTargets();
 
     await subject.run(["--target", "staging", "--json"]);
@@ -235,7 +255,7 @@ describe("project deploy handler", () => {
   });
 
   test("renders a teardown result as JSON with the removal message", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true });
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true });
     await inProjectWithTargets();
 
     await subject.run(["--yes", "--json"]);
@@ -248,13 +268,18 @@ describe("project deploy handler", () => {
   });
 
   test("renders a deploy failure as JSON without changing the thrown error", async () => {
-    const subject = testDeployCommand({ outputs: {} }, [], {
+    const subject = await testDeployCommand({ outputs: {} }, [], {
       failure: new Error("The stack failed creation: ROLLBACK_COMPLETE"),
     });
     await inProjectWithTargets();
 
     await expect(subject.run(["--json"])).rejects.toThrow("ROLLBACK_COMPLETE");
 
+    await assertMetricEmitted(subject.telemetryFilePath, "cli.command_run", {
+      command_path: "/agentcore/deploy",
+      exit_reason: "failure",
+      project_harness_count: 1,
+    });
     expect(JSON.parse(subject.io.stdout())).toEqual({
       error: "The stack failed creation: ROLLBACK_COMPLETE",
     });
@@ -263,7 +288,7 @@ describe("project deploy handler", () => {
   // --yes is the only way to authorize the teardown the backend refuses without
   // it, so a flag that never reaches the backend would make it unreachable.
   test("carries --yes through as permission to tear the stack down", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       isTTY: true,
       stdin: "\n",
       teardown: TEARDOWN,
@@ -280,7 +305,7 @@ describe("project deploy handler", () => {
   // progress UI could own the terminal), so it fires on the spec declaring
   // nothing deployable rather than on the backend's post-synth discovery.
   test("prompts before tearing down and proceeds on yes", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       isTTY: true,
       stdin: "yes\n",
       teardown: TEARDOWN,
@@ -290,6 +315,16 @@ describe("project deploy handler", () => {
 
     await subject.run();
 
+    await assertMetricEmitted(subject.telemetryFilePath, "cli.command_run", {
+      command_path: "/agentcore/deploy",
+      exit_reason: "success",
+      project_runtime_count: 0,
+      project_memory_count: 0,
+      project_gateway_count: 0,
+      project_harness_count: 0,
+      project_tool_runtime_count: 0,
+      project_payment_manager_count: 0,
+    });
     expect(subject.io.stderr()).toContain("Project 'orders' declares no resources to deploy.");
     expect(subject.io.stderr()).toContain(TEARDOWN_PROMPT);
     expect(subject.confirmations).toEqual([true]);
@@ -300,7 +335,7 @@ describe("project deploy handler", () => {
     ["no", "n\n"],
     ["the default", "\n"],
   ])("does not tear down when the user chooses %s", async (_label, stdin) => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       isTTY: true,
       stdin,
       teardown: TEARDOWN,
@@ -310,6 +345,11 @@ describe("project deploy handler", () => {
 
     await expect(subject.run()).rejects.toBeInstanceOf(UserCancellationError);
 
+    await assertMetricEmitted(subject.telemetryFilePath, "cli.command_run", {
+      command_path: "/agentcore/deploy",
+      exit_reason: "failure",
+      project_harness_count: 0,
+    });
     expect(subject.io.stderr()).toContain("(y/N)");
     // Declined before the generator started: the backend never ran.
     expect(subject.calls).toEqual([]);
@@ -317,7 +357,7 @@ describe("project deploy handler", () => {
   });
 
   test("cancels when interactive input closes without an answer", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       isTTY: true,
       stdin: "",
       teardown: TEARDOWN,
@@ -327,6 +367,11 @@ describe("project deploy handler", () => {
 
     await expect(subject.run()).rejects.toBeInstanceOf(UserCancellationError);
 
+    await assertMetricEmitted(subject.telemetryFilePath, "cli.command_run", {
+      command_path: "/agentcore/deploy",
+      exit_reason: "failure",
+      project_harness_count: 0,
+    });
     expect(subject.calls).toEqual([]);
     expect(subject.io.stderr()).not.toContain("Removed project");
   });
@@ -335,7 +380,7 @@ describe("project deploy handler", () => {
   // empty template from a non-empty spec); the backend's post-synth count is
   // the backstop, and by then the answer must already be no.
   test("falls back to requiring --yes when only synthesis reveals the teardown", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       isTTY: true,
       stdin: "yes\n",
       teardown: TEARDOWN,
@@ -349,7 +394,7 @@ describe("project deploy handler", () => {
   });
 
   test("requires --yes instead of prompting in a non-interactive shell", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       stdin: "yes\n",
       teardown: TEARDOWN,
     });
@@ -362,7 +407,7 @@ describe("project deploy handler", () => {
   });
 
   test("requires --yes instead of prompting in JSON mode", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [], {
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [], {
       isTTY: true,
       stdin: "yes\n",
       teardown: TEARDOWN,
@@ -380,7 +425,7 @@ describe("project deploy handler", () => {
   });
 
   test("does not prompt for a normal deployment", async () => {
-    const subject = testDeployCommand({ outputs: { RuntimeArn: "arn:runtime" } }, [], {
+    const subject = await testDeployCommand({ outputs: { RuntimeArn: "arn:runtime" } }, [], {
       isTTY: true,
       stdin: "yes\n",
     });
@@ -392,7 +437,7 @@ describe("project deploy handler", () => {
   });
 
   test("says the project was removed when the deploy tore the stack down", async () => {
-    const subject = testDeployCommand({ outputs: {}, tornDown: true }, [
+    const subject = await testDeployCommand({ outputs: {}, tornDown: true }, [
       { type: "step", message: "Removing stack AgentCore-orders-default" },
     ]);
     await inProjectWithTargets();
@@ -408,7 +453,7 @@ describe("project deploy handler", () => {
   });
 
   test("rejects an unknown target without invoking the backend", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets();
 
     await expect(subject.run(["--target", "nope"])).rejects.toThrow(
@@ -418,7 +463,7 @@ describe("project deploy handler", () => {
   });
 
   test("requires deployment targets to be configured for a named target", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets(JSON.stringify([]));
 
     await expect(subject.run(["--target", "staging"])).rejects.toThrow(
@@ -430,7 +475,7 @@ describe("project deploy handler", () => {
   // The zero-configuration path: a fresh project's aws-targets.json is [], so
   // the first deploy must invent the default target rather than demand edits.
   test("creates the default target from the environment on first deploy", async () => {
-    const subject = testDeployCommand({ outputs: { RuntimeArn: "arn:runtime" } });
+    const subject = await testDeployCommand({ outputs: { RuntimeArn: "arn:runtime" } });
     const projectRoot = await inProjectWithTargets(JSON.stringify([]));
 
     await subject.run(["--region", "us-west-2"]);
@@ -451,7 +496,7 @@ describe("project deploy handler", () => {
   });
 
   test("rejects an unsupported region instead of writing an invalid target", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     const projectRoot = await inProjectWithTargets(JSON.stringify([]));
 
     const message = await messageFrom(subject.run(["--region", "af-south-1"]));
@@ -463,7 +508,7 @@ describe("project deploy handler", () => {
   });
 
   test("explains how to fix unresolvable credentials", async () => {
-    const subject = testDeployCommand({ outputs: {} }, [], {
+    const subject = await testDeployCommand({ outputs: {} }, [], {
       resolveAccount: async () => {
         throw new Error("Could not load credentials from any providers");
       },
@@ -490,7 +535,7 @@ async function messageFrom(command: Promise<void>): Promise<string> {
 
 describe("project deploy reports which field of aws-targets.json is wrong", () => {
   test("names the offending field for an unsupported region", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets(
       JSON.stringify([{ name: "default", account: "111122223333", region: "us-east-11" }]),
     );
@@ -504,7 +549,7 @@ describe("project deploy reports which field of aws-targets.json is wrong", () =
   });
 
   test("surfaces the duplicate target name", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets(JSON.stringify([DEFAULT_TARGET, DEFAULT_TARGET]));
 
     await expect(subject.run()).rejects.toThrow(
@@ -514,7 +559,7 @@ describe("project deploy reports which field of aws-targets.json is wrong", () =
   });
 
   test("surfaces the account id rule", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets(
       JSON.stringify([{ name: "default", account: "123", region: "us-east-1" }]),
     );
@@ -524,7 +569,7 @@ describe("project deploy reports which field of aws-targets.json is wrong", () =
   });
 
   test("surfaces the parse error for malformed json", async () => {
-    const subject = testDeployCommand({ outputs: {} });
+    const subject = await testDeployCommand({ outputs: {} });
     await inProjectWithTargets('[{ "name": "default", }]');
 
     await expect(subject.run()).rejects.toThrow(/JSON Parse error/);
