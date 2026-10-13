@@ -19,6 +19,7 @@ import { TestCoreClient, TestGlobalConfigAccessor, testIO } from "../../../testi
 import { JsonRendererKey } from "../../../tui";
 import { JsonKey, RegionKey } from "../../keys";
 import type { DeployProjectInput, Project } from "../types";
+import type { V0DeployInput } from "../../../core/project/legacy/deploy";
 import { ProjectSpecSchema } from "../../../projectSchemas/project";
 import {
   BMA_POLICY_FILE,
@@ -129,6 +130,7 @@ function harness(options: HarnessOptions = {}) {
   const collector = fakeCollector();
   const environmentInputs: DevEnvironmentInput[] = [];
   const deployments: { project: Project; input: DeployProjectInput }[] = [];
+  const legacyDeployments: V0DeployInput[] = [];
   const resolutions: Parameters<
     DevProjectHandlerConfig["projectManager"]["resolveDeployedResource"]
   >[1][] = [];
@@ -186,6 +188,10 @@ function harness(options: HarnessOptions = {}) {
       watchers.push({ path, onChange });
     },
     projectManager,
+    runV0Deploy: async (input) => {
+      legacyDeployments.push(input);
+      return 0;
+    },
     waitReady: async () => {
       await Bun.sleep(5);
     },
@@ -206,6 +212,7 @@ function harness(options: HarnessOptions = {}) {
     collector,
     environmentInputs,
     deployments,
+    legacyDeployments,
     resolutions,
     harnessClient,
     io,
@@ -244,6 +251,27 @@ async function inspectorStatus(subject: ReturnType<typeof harness>): Promise<{ n
 }
 
 describe("project dev selection and dispatch", () => {
+  test("loads the environment and dispatches a translated v0 runtime", async () => {
+    const configuredProject = project(runtime());
+    configuredProject.legacy = {
+      format: "v0",
+      v0Spec: {} as never,
+      extras: {} as never,
+    };
+    const subject = harness({ project: configuredProject });
+
+    await subject.run({ agent: "orders" });
+
+    expect(subject.environmentInputs).toEqual([
+      {
+        projectRoot: "/workspace/project",
+        runtime: expect.objectContaining({ name: "orders" }),
+        region: "us-west-2",
+      },
+    ]);
+    expect(subject.codeZip.inputs).toHaveLength(1);
+  });
+
   test.each([
     ["headless", undefined, project(bmaRuntime({ additionalPolicies: undefined }))],
     ["browser", undefined, project(bmaRuntime({ tags: undefined }))],
@@ -662,6 +690,34 @@ async function inspectorRequest({
 }
 
 describe("project dev harnesses", () => {
+  test("a v0 harness project uses the v0 deployer before continuing in v1 dev", async () => {
+    const configuredProject = harnessProject();
+    configuredProject.legacy = {
+      format: "v0",
+      v0Spec: {} as never,
+      extras: {
+        abTests: [],
+        datasets: [],
+        capacityProviders: [],
+        unassignedTargets: [],
+      },
+    };
+    const subject = harness({ project: configuredProject });
+
+    await subject.route(["--target", "staging", "--yes"]);
+
+    expect(subject.legacyDeployments).toEqual([
+      {
+        projectRoot: configuredProject.rootPath,
+        target: "staging",
+        yes: true,
+        json: false,
+      },
+    ]);
+    expect(subject.deployments).toEqual([]);
+    expect(subject.io.stderr()).toContain("running AgentCore CLI 0.31.1 deploy");
+  });
+
   test.each([
     { names: ["support"], args: [], json: false },
     { names: ["orders", "support"], args: ["--mode", "headless"], json: true },
