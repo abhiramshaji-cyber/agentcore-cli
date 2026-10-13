@@ -164,6 +164,8 @@ import { toClientConfig } from "./utils";
 import { grantOnlineEvalScope } from "./onlineEvalExecutionRole";
 import { accountIdFromArn, deleteAbTestRole, provisionAbTestRole } from "./abTestExecutionRole";
 import { harnessRuntimeFromResponse } from "./harness";
+import { serviceIdFromArn } from "./arn";
+import type { LogSource } from "./observability/types";
 
 const DEFAULT_INGESTION_WAIT_MS = 180_000;
 const DATASET_EXAMPLES_BATCH_LIMIT = 1000;
@@ -224,6 +226,42 @@ export class EvalClient implements CoreEvalClient {
     private readonly now: () => number = () => Date.now(),
     private readonly cloudWatch: CloudWatchClient = new CloudWatchClient(clients),
   ) {}
+
+  async resourceOnlineEvaluationLogSource(
+    onlineEvaluationConfigId: string,
+    options: CoreOptions,
+  ): Promise<LogSource> {
+    const onlineEvaluationConfig = await this.getOnlineEvaluationConfig(
+      onlineEvaluationConfigId,
+      options,
+    );
+    const cloudWatchOutputConfig = onlineEvaluationConfig.outputConfig?.cloudWatchConfig;
+    if (cloudWatchOutputConfig?.logGroupName)
+      return { logGroupName: cloudWatchOutputConfig.logGroupName };
+    if (onlineEvaluationConfig.outputConfig && !cloudWatchOutputConfig) {
+      throw new InputValidationError("Logs require a CloudWatch output configuration.");
+    }
+    if (cloudWatchOutputConfig?.resultDestination !== "SOURCE_LOG_GROUP") {
+      return {
+        logGroupName: `/aws/bedrock-agentcore/evaluations/results/${onlineEvaluationConfig.onlineEvaluationConfigId ?? serviceIdFromArn(onlineEvaluationConfigId)}`,
+      };
+    }
+    const cloudWatchSourceConfig = onlineEvaluationConfig.dataSourceConfig?.cloudWatchLogs;
+    if (
+      cloudWatchSourceConfig?.logGroupNamePrefixes?.length ||
+      (cloudWatchSourceConfig?.logGroupNames?.length ?? 0) > 1
+    ) {
+      throw new InputValidationError(
+        "Results use multiple source log groups or prefixes. " +
+          "Read them directly in CloudWatch Logs, or configure one explicit source log group.",
+      );
+    }
+    const sourceLogGroupName = cloudWatchSourceConfig?.logGroupNames?.[0];
+    if (!sourceLogGroupName) {
+      throw new MalformedServiceResponseError("Missing source log group name.");
+    }
+    return { logGroupName: sourceLogGroupName };
+  }
 
   async createEvaluator(
     request: CreateEvaluatorRequest,

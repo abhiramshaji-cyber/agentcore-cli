@@ -57,6 +57,7 @@ import type {
   DataSourceConfig as DataPlaneDataSourceConfig,
 } from "@aws-sdk/client-bedrock-agentcore";
 import type { CoreOptions } from "../../core/types";
+import type { LogSource } from "../../core/observability/types";
 import type { EvaluatorModelProvider } from "../../projectSchemas/evaluator";
 
 // SessionWindow is the resolved explicit time filter for a batch evaluation's
@@ -88,7 +89,8 @@ export type SessionSourceValue =
 // indistinguishable list — this keeps `level` and the id fields so callers can
 // tell a SESSION result from a TRACE or TOOL_CALL one, and group by session.
 export type BatchEvaluationResultEntry = {
-  evaluatorId: string;
+  // Session/trace failures can occur before an evaluator is selected.
+  evaluatorId?: string;
   // The scope the score applies to, read from the result log record's
   // `aws.bedrock_agentcore.evaluation_level` attribute (Title-case, e.g. "Trace"
   // / "Session"). The trustworthy discriminator — do not infer it from which id
@@ -102,6 +104,7 @@ export type BatchEvaluationResultEntry = {
   label?: string;
   explanation?: string;
   error?: string;
+  errorType?: string;
 };
 
 // BatchEvaluationDetail is a GetBatchEvaluation response augmented with the
@@ -341,6 +344,7 @@ export type DatasetUpdateProgressEvent = {
 // and implemented by src/core/eval.tsx (dependency inversion: handlers own the
 // abstraction).
 export interface CoreEvalClient {
+  resourceOnlineEvaluationLogSource(id: string, options: CoreOptions): Promise<LogSource>;
   createEvaluator(
     request: CreateEvaluatorRequest,
     options: CoreOptions,

@@ -1625,6 +1625,13 @@ export class TestPaymentClient implements CorePaymentClient {
 export class TestEvalClient implements CoreEvalClient {
   // calls records every invocation in order, for assertions.
   readonly calls: RecordedCall[] = [];
+  logSource: LogSource = { logGroupName: "/test/eval/results" };
+
+  async resourceOnlineEvaluationLogSource(id: string, options: CoreOptions) {
+    this.calls.push({ method: "resourceOnlineEvaluationLogSource", args: [id, options] });
+    if (this.error) throw this.error;
+    return this.logSource;
+  }
 
   // List responses are keyed by the nextToken that requests them (undefined =
   // the first page), so tests can serve multi-page listings.
