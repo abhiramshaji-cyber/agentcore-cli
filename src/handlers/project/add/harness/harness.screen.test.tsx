@@ -50,7 +50,7 @@ async function reachModelStep(screen: RenderScreenResult, name: string): Promise
   await waitForText(screen.lastFrame, "what is the agent's system prompt?");
   await screen.write("You are a pirate.");
   await screen.press("ctrl+d");
-  await waitForText(screen.lastFrame, "choose a model provider");
+  await waitForText(screen.lastFrame, "choose a model gateway");
 }
 
 // acceptDefaultModel confirms the preselected provider and its default model
@@ -87,8 +87,8 @@ describe("project add harness wizard", () => {
     // The model step is the one `agentcore create` asks for a config-based
     // project: the same provider list, bedrock preselected, and the fields
     // hidden until the provider is confirmed.
-    await waitForText(screen.lastFrame, "choose a model provider");
-    expect(screen.lastFrame()).toContain("● model provider ──");
+    await waitForText(screen.lastFrame, "choose a model gateway");
+    expect(screen.lastFrame()).toContain("● model gateway ──");
     expect(screen.lastFrame()).toContain("❯ ● bedrock");
     expect(screen.lastFrame()).toContain("○ openai");
     expect(screen.lastFrame()).toContain("○ gemini");
@@ -150,12 +150,12 @@ describe("project add harness wizard", () => {
     await screen.press("ctrl+d");
 
     await waitForText(screen.lastFrame, "System prompt is required");
-    expect(screen.lastFrame()).not.toContain("choose a model provider");
+    expect(screen.lastFrame()).not.toContain("choose a model gateway");
 
     // Enter on the empty editor answers the step the same way.
     await screen.press("return");
     expect(screen.lastFrame()).toContain("System prompt is required");
-    expect(screen.lastFrame()).not.toContain("choose a model provider");
+    expect(screen.lastFrame()).not.toContain("choose a model gateway");
     screen.unmount();
   });
 
@@ -176,7 +176,7 @@ describe("project add harness wizard", () => {
     await screen.write("!");
     await screen.press("ctrl+d");
 
-    await waitForText(screen.lastFrame, "choose a model provider");
+    await waitForText(screen.lastFrame, "choose a model gateway");
     await acceptDefaultModel(screen);
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     await screen.press("return");
@@ -270,7 +270,7 @@ describe("project add harness wizard", () => {
     screen.unmount();
   }, 15000);
 
-  test("LiteLLM takes an optional API base URL and writes it", async () => {
+  test("LiteLLM requires a gateway URL and writes a proxy model alias", async () => {
     const projectRoot = await inProject();
     const screen = renderScreen("/agentcore/add/harness");
     await reachModelStep(screen, "assistant");
@@ -281,31 +281,39 @@ describe("project add harness wizard", () => {
     await waitForText(screen.lastFrame, "❯ ● litellm");
     await screen.press("return");
 
-    // LiteLLM is the one provider with an API base; its key is optional.
-    await waitForText(screen.lastFrame, "Custom API base URL");
+    // LiteLLM requires its gateway endpoint and gateway credential.
+    await waitForText(screen.lastFrame, "Gateway API base URL");
     expect(flatFrame(screen.lastFrame)).toContain(
-      "optional · API-key providers need file://<path> or an AgentCore Identity API-key credential provider ARN. Bedrock can use AWS IAM or an API key.",
+      "gateway API key via file://<path> or a credential provider ARN",
     );
-    expect(screen.lastFrame()).toContain(
-      "leave blank to use the model provider's default endpoint",
+    expect(screen.lastFrame()).not.toContain(`bedrock/${DEFAULT_HARNESS_MODEL.modelId}`);
+    await screen.write("my-model");
+    await screen.press("return");
+    await screen.press("return"); // missing gateway key
+    await waitForText(
+      screen.lastFrame,
+      "enter the API key file or credential provider ARN for litellm",
     );
-    expect(screen.lastFrame()).toContain(`bedrock/${DEFAULT_HARNESS_MODEL.modelId}`);
-    await screen.press("return"); // keep the default model ID
-    await screen.press("return"); // no API key
+    await screen.write("arn:gateway-key");
+    await screen.press("return");
+    await screen.press("return");
+    await waitForText(screen.lastFrame, "enter the LiteLLM gateway API base URL");
+    expect((await projectSpec(projectRoot)).harnesses ?? []).toHaveLength(0);
     await screen.write("https://llm.example.com/v1");
     await screen.press("return");
 
     await waitForText(screen.lastFrame, "this harness will be added to agentcore.json");
     const review = flatFrame(screen.lastFrame);
     expect(review).toContain("provider litellm");
-    expect(review).toContain("Custom API base URL https://llm.example.com/v1");
-    expect(review).not.toContain("API key");
+    expect(review).toContain("Gateway API base URL https://llm.example.com/v1");
+    expect(review).toContain("API key arn:gateway-key");
     await screen.press("return");
 
     await waitForText(screen.lastFrame, "added harness 'assistant'");
     expect((await harnessYaml(projectRoot, "assistant")).model).toEqual({
       liteLlmModelConfig: {
-        modelId: `bedrock/${DEFAULT_HARNESS_MODEL.modelId}`,
+        modelId: "litellm_proxy/my-model",
+        apiKeyArn: "arn:gateway-key",
         apiBase: "https://llm.example.com/v1",
       },
     });
@@ -346,7 +354,7 @@ describe("project add harness wizard", () => {
 
     await waitFor(() => !(screen.lastFrame() ?? "").includes("model ID"));
     expect(screen.lastFrame()).toContain("❯ ● bedrock");
-    expect(screen.lastFrame()).toContain("choose a model provider");
+    expect(screen.lastFrame()).toContain("choose a model gateway");
     screen.unmount();
   });
 

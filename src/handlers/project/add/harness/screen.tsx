@@ -194,7 +194,7 @@ function AddHarnessWizard({
         />
       </Step>
 
-      <Step stepKey="model" title="model provider">
+      <Step stepKey="model" title="model gateway">
         <HarnessModelField value={values.model} onChange={(model) => set({ model })} />
       </Step>
 

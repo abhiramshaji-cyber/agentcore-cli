@@ -76,8 +76,8 @@ describe("project create wizard", () => {
     await r.press("return");
 
     // Model step: fields stay hidden until the provider is confirmed.
-    await waitForText(r.lastFrame, "choose a model provider or gateway");
-    expect(r.lastFrame()).toContain("● model provider ──");
+    await waitForText(r.lastFrame, "choose a model gateway");
+    expect(r.lastFrame()).toContain("● model gateway ──");
     expect(r.lastFrame()).toContain("● bedrock");
     expect(r.lastFrame()).not.toContain("bedrock (recommended)");
     expect(r.lastFrame()).toContain("○ openai");
@@ -139,7 +139,7 @@ describe("project create wizard", () => {
 
     // Enter focuses the selected provider's model field. The cursor starts at
     // the end of the prefilled id, so typing appends.
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return");
     await r.write("-test");
     await r.press("return");
@@ -174,7 +174,7 @@ describe("project create wizard", () => {
     await waitForText(r.lastFrame, "what kind of agent to start with?");
     await r.press("return"); // config-based is the default
 
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down");
     expect(r.lastFrame()).toContain("● openai");
     await r.press("return"); // focus model id
@@ -235,7 +235,7 @@ describe("project create wizard", () => {
     await r.press("return");
     await waitForText(r.lastFrame, "what kind of agent to start with?");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down"); // openai
     await r.press("return"); // focus model id
     await r.press("return"); // focus API key
@@ -284,7 +284,7 @@ describe("project create wizard", () => {
     await r.write("InlineApp");
     await r.press("return");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down"); // openai
     await r.press("return"); // focus model id
     await r.press("return"); // focus API key
@@ -302,7 +302,7 @@ describe("project create wizard", () => {
     await r.write("ProviderApp");
     await r.press("return");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
 
     await r.press("down"); // openai
     await r.press("return"); // model id
@@ -323,7 +323,7 @@ describe("project create wizard", () => {
     await r.write("ModelApp");
     await r.press("return");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
 
     await r.press("down"); // openai
     await waitForText(r.lastFrame, "● openai");
@@ -349,7 +349,7 @@ describe("project create wizard", () => {
     await r.write("CompactApp");
     await r.press("return");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
 
     const frame = r.lastFrame()!;
     const lines = frame.split("\n");
@@ -376,17 +376,17 @@ describe("project create wizard", () => {
     await r.write("CompactApp");
     await r.press("return");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down");
     await r.press("down");
     await r.press("down"); // litellm
     await r.press("return");
-    await waitForText(r.lastFrame, "the litellm model to use");
+    await waitForText(r.lastFrame, "the model alias configured in your LiteLLM gateway");
 
     const lines = r.lastFrame()!.split("\n");
     expect(lines).toHaveLength(24);
     expect(lines[0]).toContain("agentcore → create");
-    expect(lines).toContain(" choose a model provider or gateway");
+    expect(lines).toContain(" choose a model gateway");
     expect(lines).toContain(" model ID");
     expect(lines).toContain(" API key");
     expect(lines.at(-2)).toBe("─".repeat(80));
@@ -422,13 +422,13 @@ describe("project create wizard", () => {
     await r.press("return");
     await waitForText(r.lastFrame, "what kind of agent to start with?");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
 
     await r.press("return"); // focus the model id
     await waitForText(r.lastFrame, DEFAULT_MODEL_ID);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const frame = r.lastFrame()!;
-    expect(frame).toContain("choose a model provider");
+    expect(frame).toContain("choose a model gateway");
     expect(frame).toContain("● bedrock");
     expect(frame).toContain("○ litellm");
     r.unmount();
@@ -442,7 +442,7 @@ describe("project create wizard", () => {
     await r.write("CompactApp");
     await r.press("return");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down");
     await r.press("down");
     await r.press("down"); // litellm
@@ -454,14 +454,14 @@ describe("project create wizard", () => {
 
     // The model ID fits without scrolling.
     await r.press("return");
-    await waitForText(r.lastFrame, "the litellm model to use");
-    expect((await settledLines())[firstContentLine]).toBe(" choose a model provider or gateway");
+    await waitForText(r.lastFrame, "the model alias configured in your LiteLLM gateway");
+    expect((await settledLines())[firstContentLine]).toBe(" choose a model gateway");
     await r.press("down");
-    // The API key's bottom border is below the fold, so focusing it reveals the full field.
+    // The shorter gateway credential help lets the API key fit without scrolling.
     const keyLines = await settledLines();
-    expect(keyLines[firstContentLine]).not.toBe(" choose a model provider or gateway");
+    expect(keyLines[firstContentLine]).toBe(" choose a model gateway");
     expect(keyLines).toContain(" API key");
-    const keyInputLine = keyLines.findIndex((line) => line.includes("│❯ optional"));
+    const keyInputLine = keyLines.findIndex((line) => line.includes("│❯ file://./api-key.txt"));
     expect(keyInputLine).toBeGreaterThan(-1);
     expect(keyLines[keyInputLine + 1]).toContain("╰");
 
@@ -469,13 +469,11 @@ describe("project create wizard", () => {
     await r.press("down");
     await waitForText(r.lastFrame, "https://…");
     const scrolled = await settledLines();
-    expect(scrolled[firstContentLine]).not.toBe(" choose a model provider or gateway");
+    expect(scrolled[firstContentLine]).not.toBe(" choose a model gateway");
     expect(scrolled[firstContentLine]).not.toBe(keyLines[firstContentLine]);
     expect(scrolled).toContain(" model ID");
-    expect(scrolled).toContain(" Custom API base URL");
-    expect(scrolled.join("\n")).toContain(
-      "leave blank to use the model provider's default endpoint",
-    );
+    expect(scrolled).toContain(" Gateway API base URL");
+    expect(scrolled.join("\n")).toContain("the endpoint of your LiteLLM gateway");
 
     // Moving back up to fields that are still visible does not shift the view.
     await r.press("up");
@@ -485,9 +483,7 @@ describe("project create wizard", () => {
 
     // Returning to the provider list shows it from the top again.
     await r.press("up");
-    await waitFor(
-      () => r.lastFrame()!.split("\n")[firstContentLine] === " choose a model provider or gateway",
-    );
+    await waitFor(() => r.lastFrame()!.split("\n")[firstContentLine] === " choose a model gateway");
     expect(r.lastFrame()).not.toContain("model ID");
     r.unmount();
   });
@@ -1233,7 +1229,7 @@ describe("project create wizard", () => {
     await r.press("return");
     await waitForText(r.lastFrame, "what kind of agent to start with?");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return");
     await r.press("return");
     await waitForText(r.lastFrame, "this project will be created");
@@ -1275,7 +1271,7 @@ describe("project create wizard", () => {
     await r.press("return");
     await waitForText(r.lastFrame, "what kind of agent to start with?");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return"); // focus model id
     await r.press("return"); // accept model id
     await waitForText(r.lastFrame, "this project will be created");
@@ -1316,7 +1312,7 @@ describe("project create wizard", () => {
     await r.press("return");
     await waitForText(r.lastFrame, "what kind of agent to start with?");
     await r.press("return"); // config-based is the default
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return");
     await r.press("return");
     await waitForText(r.lastFrame, "this project will be created");

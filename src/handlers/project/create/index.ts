@@ -32,6 +32,7 @@ import { stripCreateRegionUnavailableDefaults, validateCreateRegionSupport } fro
 import { chinaModelProviderRestriction } from "../../../core/project/manager";
 import { isChinaRegion } from "../../../core/partition";
 import { harnessApiKeyCredentialName } from "../../../core/project/templates/harness";
+import { toLiteLlmGatewayModel } from "../../harness/liteLlmGateway";
 
 type CreateProjectHandlerConfig = {
   projectManager: ProjectManager;
@@ -227,7 +228,8 @@ export function resolveScaffoldHarnessInput(flags: HarnessPathFlagValues): Scaff
     name,
     model: {
       provider,
-      modelId: flags["model-id"] ?? HARNESS_DEFAULT_MODEL_IDS[provider],
+      modelId:
+        flags["model-id"] ?? (provider === "lite_llm" ? "" : HARNESS_DEFAULT_MODEL_IDS[provider]),
       apiKeyArn: flags["api-key-arn"],
       ...(managedApiKey &&
         provider !== "bedrock" && {
@@ -240,6 +242,9 @@ export function resolveScaffoldHarnessInput(flags: HarnessPathFlagValues): Scaff
   const result = HarnessSpecSchema.safeParse(input);
   if (!result.success)
     throw new InputValidationError(z.prettifyError(result.error), { cause: result.error });
+  if (input.model.provider === "lite_llm") {
+    input.model = toLiteLlmGatewayModel(input.model);
+  }
   return input;
 }
 

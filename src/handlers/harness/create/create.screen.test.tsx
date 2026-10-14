@@ -49,8 +49,8 @@ describe("harness create wizard", () => {
 
     // Step: model provider — bedrock is preselected with the default model ID;
     // enter reveals it and enter again accepts it.
-    await waitForText(r.lastFrame, "choose a model provider or gateway");
-    expect(r.lastFrame()).toContain("● model provider ──");
+    await waitForText(r.lastFrame, "choose a model gateway");
+    expect(r.lastFrame()).toContain("● model gateway ──");
     expect(r.lastFrame()).toContain("● bedrock");
     expect(r.lastFrame()).not.toContain("service default");
     expect(r.lastFrame()).not.toContain("keep current");
@@ -129,7 +129,7 @@ describe("harness create wizard", () => {
     await r.write("my_agent");
     await r.press("return");
 
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await waitForText(r.lastFrame, "● bedrock");
     expect(r.lastFrame()).not.toContain("model ID");
 
@@ -150,7 +150,7 @@ describe("harness create wizard", () => {
     await r.write("my_agent");
     await r.press("return");
 
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down"); // gemini
     await waitForText(r.lastFrame, "● gemini");
     await r.press("return"); // focus the model id field
@@ -192,7 +192,7 @@ describe("harness create wizard", () => {
     await r.write("my_agent");
     await r.press("return");
 
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down"); // gemini
     await r.press("down"); // openai
     await waitForText(r.lastFrame, "● openai");
@@ -231,8 +231,8 @@ describe("harness create wizard", () => {
     r.unmount();
   });
 
-  test.each([HARNESS_DEFAULT_MODEL_IDS.lite_llm, "anthropic/claude-3-sonnet"])(
-    "litellm uses %s and omits the optional fields left empty",
+  test.each(["my-model", "litellm_proxy/my-model"])(
+    "litellm routes %s through the required gateway",
     async (modelId) => {
       const core = coreForCreate();
       const r = renderScreen("/agentcore/harness/create", { core });
@@ -241,29 +241,29 @@ describe("harness create wizard", () => {
       await r.write("my_agent");
       await r.press("return");
 
-      await waitForText(r.lastFrame, "choose a model provider");
+      await waitForText(r.lastFrame, "choose a model gateway");
       await r.press("down"); // gemini
       await r.press("down"); // openai
       await r.press("down"); // litellm
       await waitForText(r.lastFrame, "● litellm");
       await r.press("return"); // focus the model id field
-      await waitForText(r.lastFrame, "Custom API base URL");
+      await waitForText(r.lastFrame, "Gateway API base URL");
       expect(r.lastFrame()?.replace(/\s+/g, " ")).toContain(
-        "optional · Providers that require API keys need an AgentCore Identity API-key credential provider ARN. Bedrock models can use AWS IAM or an API key.",
+        "an AgentCore Identity credential provider ARN for your gateway API key",
       );
-      expect(r.lastFrame()).toContain("leave blank to use the model provider's default endpoint");
-      await waitForText(r.lastFrame, HARNESS_DEFAULT_MODEL_IDS.lite_llm);
-      if (modelId !== HARNESS_DEFAULT_MODEL_IDS.lite_llm) {
-        for (let i = 0; i < HARNESS_DEFAULT_MODEL_IDS.lite_llm.length; i++) {
-          await r.press("backspace");
-        }
-        expect(r.lastFrame()).toContain(HARNESS_DEFAULT_MODEL_IDS.lite_llm);
-        await r.press("return");
-        await waitForText(r.lastFrame, "enter a LiteLLM model identifier");
-        await r.write(modelId);
-      }
-      await r.press("return"); // api key arn — optional, leave empty
-      await r.press("return"); // api base url — optional, leave empty
+      expect(r.lastFrame()).not.toContain(HARNESS_DEFAULT_MODEL_IDS.lite_llm);
+      await r.press("return");
+      await waitForText(r.lastFrame, "enter the model alias configured in your LiteLLM gateway");
+      await r.write(` ${modelId} `);
+      await r.press("return"); // api key arn
+      await r.press("return");
+      await waitForText(r.lastFrame, "enter a gateway API-key credential provider ARN");
+      await r.write(" arn:gateway-key ");
+      await r.press("return"); // api base url
+      await r.press("return");
+      await waitForText(r.lastFrame, "enter the LiteLLM gateway API base URL");
+      expect(core.harness.calls.some((c) => c.method === "createHarness")).toBe(false);
+      await r.write(" https://gateway.example.com/v1 ");
       await r.press("return");
 
       await waitForText(r.lastFrame, "how should the harness remember conversations?");
@@ -273,19 +273,53 @@ describe("harness create wizard", () => {
       await waitForText(r.lastFrame, "type or paste the agent's instructions");
       await r.write("\x04");
       await waitForText(r.lastFrame, "sent to CreateHarness");
+      expect(r.lastFrame()).toContain('"modelId": "litellm_proxy/my-model"');
+      expect(r.lastFrame()).toContain('"apiKeyArn": "arn:gateway-key"');
+      expect(r.lastFrame()).toContain('"apiBase": "https://gateway.example.com/v1"');
       await r.press("return");
 
       await waitFor(() => core.harness.calls.some((c) => c.method === "createHarness"));
       const call = core.harness.calls.find((c) => c.method === "createHarness")!;
       expect(call.args[0]).toEqual({
         harnessName: "my_agent",
-        model: { liteLlmModelConfig: { modelId } },
+        model: {
+          liteLlmModelConfig: {
+            modelId: "litellm_proxy/my-model",
+            apiKeyArn: "arn:gateway-key",
+            apiBase: "https://gateway.example.com/v1",
+          },
+        },
         memory: { managedMemoryConfiguration: {} },
         tools: [BROWSER_TOOL],
       });
       r.unmount();
     },
   );
+
+  test("the required LiteLLM gateway URL is reachable in an 80x24 terminal", async () => {
+    const r = renderScreen("/agentcore/harness/create", { core: coreForCreate() });
+    await r.resize(80, 24);
+    await waitForText(r.lastFrame, "the name of your harness");
+    await r.write("GatewayHarness");
+    await r.press("return");
+    await waitForText(r.lastFrame, "choose a model gateway");
+    await r.press("down");
+    await r.press("down");
+    await r.press("down");
+    await r.press("return");
+    await r.press("down");
+    await r.press("down");
+    await waitForText(r.lastFrame, "Gateway API base URL");
+    await r.press("return");
+    await waitForText(r.lastFrame, "enter the LiteLLM gateway API base URL");
+    const lines = r.lastFrame()!.split("\n");
+    expect(lines).toHaveLength(24);
+    const inputLine = lines.findIndex((line) => line.includes("│❯ https://"));
+    expect(inputLine).toBeGreaterThan(-1);
+    expect(lines[inputLine + 1]).toContain("╰");
+    expect(lines.at(-1)).toContain("[enter] continue");
+    r.unmount();
+  });
 
   test("switching providers leaves the Bedrock default out of other providers' model ID", async () => {
     const r = renderScreen("/agentcore/harness/create", { core: coreForCreate() });
@@ -294,7 +328,7 @@ describe("harness create wizard", () => {
     await r.write("my_agent");
     await r.press("return");
 
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("down"); // gemini
     await waitForText(r.lastFrame, "● gemini");
     await r.press("return"); // focus the model id field
@@ -329,7 +363,7 @@ describe("harness create wizard", () => {
     await waitForText(r.lastFrame, "the name of your harness");
     await r.write("my_agent");
     await r.press("return");
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return"); // reveal the default bedrock model id
     await r.press("return"); // accept it
 
@@ -377,7 +411,7 @@ describe("harness create wizard", () => {
     await waitForText(r.lastFrame, "the name of your harness");
     await r.write("my_agent");
     await r.press("return");
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return"); // reveal the default bedrock model id
     await r.press("return"); // accept it
     await waitForText(r.lastFrame, "how should the harness remember conversations?");
@@ -412,7 +446,7 @@ describe("harness create wizard", () => {
     await waitForText(r.lastFrame, "the name of your harness");
     await r.write("my_agent");
     await r.press("return");
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     await r.press("return"); // reveal the default bedrock model id
     await r.press("return"); // accept it
     await waitForText(r.lastFrame, "how should the harness remember conversations?");

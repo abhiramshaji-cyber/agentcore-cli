@@ -65,12 +65,12 @@ Select one configuration under `model`: `bedrockModelConfig`, `openAiModelConfig
 `geminiModelConfig`, or `liteLlmModelConfig`. Each requires `modelId`. Choose a
 model supported by the selected provider and API format.
 
-| Provider   | Credentials                        | Provider-specific options                                          |
-| ---------- | ---------------------------------- | ------------------------------------------------------------------ |
-| `bedrock`  | Harness execution role             | `apiFormat`: `converse_stream`, `responses`, or `chat_completions` |
-| `open_ai`  | `apiKeyArn` is required            | `apiFormat`: `responses` or `chat_completions`                     |
-| `gemini`   | `apiKeyArn` is required            | `topK`: integer from 0 to 500                                      |
-| `lite_llm` | Depends on the underlying provider | `apiBase` for a custom endpoint                                    |
+| Provider   | Credentials                    | Provider-specific options                                          |
+| ---------- | ------------------------------ | ------------------------------------------------------------------ |
+| `bedrock`  | Harness execution role         | `apiFormat`: `converse_stream`, `responses`, or `chat_completions` |
+| `open_ai`  | `apiKeyArn` is required        | `apiFormat`: `responses` or `chat_completions`                     |
+| `gemini`   | `apiKeyArn` is required        | `topK`: integer from 0 to 500                                      |
+| `lite_llm` | Gateway credential is required | CLI authoring requires the gateway's `apiBase` URL                 |
 
 `apiKeyArn` identifies an AgentCore Identity API-key credential provider, not a
 raw API key or a Secrets Manager secret ARN. The execution role needs permission
@@ -114,19 +114,47 @@ model:
     topK: 40
 ```
 
-For LiteLLM, use a provider-prefixed model ID:
+For LiteLLM, configure the customer's model gateway. The Harness CLI wizards and
+model flags require the gateway's API base URL and a model alias configured on
+that gateway. They add the `litellm_proxy/` prefix to the alias, unless it is
+already present, so the SDK calls the gateway rather than the underlying
+provider directly. No Bedrock-backed LiteLLM model is prefilled.
+
+In `harness.yaml`, use the explicit proxy-prefixed alias:
 
 ```yaml
 model:
   liteLlmModelConfig:
-    modelId: openai/gpt-6.1-sol
+    modelId: litellm_proxy/my-model
     apiBase: https://models.example.com/v1
     apiKeyArn: arn:aws:bedrock-agentcore:us-west-2:123456789012:token-vault/default/apikeycredentialprovider/model-proxy
 ```
 
+The credential is the gateway API key, not the upstream provider's API key.
+The CLI requires the gateway credential because the LiteLLM proxy SDK path
+requires credentials, even if the gateway's own authentication policy differs.
+The gateway determines the upstream provider, which can still be Bedrock.
+
+For project scaffolding:
+
+```sh
+agentcore add harness --name assistant \
+  --model '{"provider":"lite_llm","modelId":"my-model","apiBase":"https://models.example.com/v1"}' \
+  --api-key file://./gateway-key.txt
+```
+
+This narrows newly authored CLI configurations to gateway routing. Existing
+Harness API/CDK configurations and files remain compatible with direct LiteLLM
+SDK models. Reading, deploying, or exporting them does not rewrite the model;
+an unchanged legacy model is also preserved during unrelated wizard updates.
+Changing a LiteLLM model through the CLI requires the gateway configuration.
+
 Do not set `apiFormat` for `gemini` or `lite_llm`, `topK` for other providers,
 or `apiBase` outside `lite_llm` in this YAML format.
 LiteLLM also accepts `model.liteLlmModelConfig.additionalParams` for provider-specific options.
+When authoring a gateway model through the CLI, `additionalParams` cannot override
+`model`, `api_base`, `base_url`, `custom_llm_provider`, `use_litellm_proxy`, or
+`fallbacks`. Configure routing and fallbacks on the gateway instead.
 
 See [Models and instructions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-models.html)
 for provider behavior and supported API formats.

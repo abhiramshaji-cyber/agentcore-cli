@@ -14,6 +14,7 @@ import type { Core } from "../../types.tsx";
 import { coreOptsFromCtx, parseJsonFlag, parseTags } from "../../utils.tsx";
 import { JsonRendererKey } from "../../../tui";
 import { parameterHelp } from "../parameterHelp.tsx";
+import { toHarnessGatewayModel } from "../liteLlmGateway";
 
 export const createCreateHarnessHandler = (core: Core) =>
   createHandler({
@@ -99,7 +100,9 @@ export const createCreateHarnessHandler = (core: Core) =>
           harnessName: flags["name"],
           executionRoleArn: flags["execution-role-arn"],
           systemPrompt: flags["system-prompt"] ? [{ text: flags["system-prompt"] }] : undefined,
-          model: parseJsonFlag<HarnessModelConfiguration>("model", flags["model"]),
+          model: toHarnessGatewayModel(
+            parseJsonFlag<HarnessModelConfiguration>("model", flags["model"]),
+          ),
           tools: parseJsonFlag<HarnessTool[]>("tools", flags["tools"]),
           skills: parseJsonFlag<HarnessSkill[]>("skills", flags["skills"]),
           allowedTools: flags["allowed-tools"],

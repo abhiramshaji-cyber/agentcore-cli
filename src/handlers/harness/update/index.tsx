@@ -14,6 +14,7 @@ import type { Core } from "../../types.tsx";
 import { coreOptsFromCtx, parseJsonFlag } from "../../utils.tsx";
 import { JsonRendererKey } from "../../../tui";
 import { parameterHelp } from "../parameterHelp.tsx";
+import { toHarnessGatewayModel } from "../liteLlmGateway";
 
 // updated wraps a PATCH-semantics field: `--<flag> <json>` replaces the value,
 // `--clear-<flag> true` sends an empty wrapper (unsetting it), and omitting
@@ -111,7 +112,9 @@ export const createUpdateHarnessHandler = (core: Core) =>
           harnessId: flags["id"],
           executionRoleArn: flags["execution-role-arn"],
           systemPrompt: flags["system-prompt"] ? [{ text: flags["system-prompt"] }] : undefined,
-          model: parseJsonFlag<HarnessModelConfiguration>("model", flags["model"]),
+          model: toHarnessGatewayModel(
+            parseJsonFlag<HarnessModelConfiguration>("model", flags["model"]),
+          ),
           tools: parseJsonFlag<HarnessTool[]>("tools", flags["tools"]),
           skills: parseJsonFlag<HarnessSkill[]>("skills", flags["skills"]),
           allowedTools: flags["allowed-tools"],

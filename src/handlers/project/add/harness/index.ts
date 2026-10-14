@@ -16,6 +16,7 @@ import {
 } from "../../../../core/project/templates/harness";
 import { SourceResolver } from "../../../../io";
 import type { AddResourceInput, Project } from "../../types";
+import { toLiteLlmGatewayModel } from "../../../harness/liteLlmGateway";
 
 const CONFIGURATION = "Configuration:";
 const TOOLS_AND_SKILLS = "Tools and skills:";
@@ -44,6 +45,9 @@ export function toAddHarnessInput(
   );
   if (!result.success)
     throw new InputValidationError(z.prettifyError(result.error), { cause: result.error });
+  if (result.data.model.provider === "lite_llm") {
+    result.data.model = toLiteLlmGatewayModel(result.data.model);
+  }
   requireDeployedNameFits("Harness", project.name, result.data.name, "_", 40, targets);
   return {
     resourceType: "harness",

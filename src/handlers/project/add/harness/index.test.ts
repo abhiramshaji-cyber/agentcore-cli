@@ -80,8 +80,20 @@ describe("project add harness", () => {
     ],
     [
       "model — litellm",
-      ["--name", "x", "--model", '{"provider":"lite_llm","modelId":"anthropic/claude-3"}'],
-      { model: { provider: "lite_llm", modelId: "anthropic/claude-3" } },
+      [
+        "--name",
+        "x",
+        "--model",
+        '{"provider":"lite_llm","modelId":"my-model","apiBase":"https://gateway.example.com/v1","apiKeyArn":"arn:gateway-key"}',
+      ],
+      {
+        model: {
+          provider: "lite_llm",
+          modelId: "litellm_proxy/my-model",
+          apiBase: "https://gateway.example.com/v1",
+          apiKeyArn: "arn:gateway-key",
+        },
+      },
     ],
     [
       "tools — remote_mcp",
@@ -473,7 +485,7 @@ describe("project add harness", () => {
         "--name",
         "x",
         "--model",
-        '{"provider":"lite_llm","modelId":"anthropic/claude-3"}',
+        '{"provider":"lite_llm","modelId":"my-model","apiBase":"https://gateway.example.com/v1"}',
         "--api-key",
         "-",
       ],
@@ -486,6 +498,24 @@ describe("project add harness", () => {
         credentialEnvVarName("xLiteLLMApiKey")
       ],
     ).toBe("sk-stdin");
+  });
+
+  test("a missing LiteLLM gateway URL is rejected before writing a harness or reading its key", async () => {
+    const { projectRoot, cleanup } = await initProject();
+    cleanups.push(cleanup);
+    await expect(
+      run([
+        "add",
+        "harness",
+        "--name",
+        "x",
+        "--model",
+        '{"provider":"lite_llm","modelId":"my-model"}',
+        "--api-key",
+        "file://does-not-exist",
+      ]),
+    ).rejects.toThrow("enter the LiteLLM gateway API base URL");
+    expect(existsSync(join(projectRoot, "app", "x"))).toBe(false);
   });
 
   test.each<[string, string, RegExp]>([

@@ -71,7 +71,7 @@ describe("harness update wizard", () => {
     await waitForText(r.lastFrame, "MyHarness");
     expect(r.lastFrame()).toContain("choose a harness to update");
     await r.press("return");
-    await waitForText(r.lastFrame, "choose a model provider");
+    await waitForText(r.lastFrame, "choose a model gateway");
     r.unmount();
   });
 
@@ -178,6 +178,87 @@ describe("harness update wizard", () => {
 
     await r.press("return");
     await waitForText(r.lastFrame, memoryArn);
+    r.unmount();
+  });
+
+  test("an unchanged legacy LiteLLM model does not block a prompt-only update", async () => {
+    const core = coreForUpdate();
+    const current = currentHarness();
+    current.harness!.model = {
+      liteLlmModelConfig: { modelId: "bedrock/legacy-model" },
+    };
+    core.harness.setGetResponse(current);
+    const r = renderScreen("/agentcore/harness/update/MyHarness-abc123", { core });
+
+    await waitForText(r.lastFrame, "● litellm");
+    await r.press("return");
+    await waitForText(r.lastFrame, "bedrock/legacy-model");
+    await r.press("return");
+    await r.press("return");
+    await r.press("return");
+    await waitForText(r.lastFrame, "● managed");
+    await r.press("return");
+    await waitForText(r.lastFrame, "[✓] browser");
+    await r.press("return");
+    await waitForText(r.lastFrame, "type or paste the agent's instructions");
+    await r.write(" Now v2.");
+    await r.write("\x04");
+    await waitForText(r.lastFrame, "sent to UpdateHarness");
+    await r.press("return");
+
+    await waitFor(() => core.harness.calls.some((call) => call.method === "updateHarness"));
+    expect(core.harness.calls.find((call) => call.method === "updateHarness")!.args[0]).toEqual({
+      harnessId: "MyHarness-abc123",
+      systemPrompt: [{ text: "You are v1. Now v2." }],
+    });
+    r.unmount();
+  });
+
+  test("switching to LiteLLM clears the upstream model and credential", async () => {
+    const core = coreForUpdate();
+    const current = currentHarness();
+    current.harness!.model = {
+      openAiModelConfig: { modelId: "upstream-model", apiKeyArn: "arn:upstream-key" },
+    };
+    core.harness.setGetResponse(current);
+    const r = renderScreen("/agentcore/harness/update/MyHarness-abc123", { core });
+
+    await waitForText(r.lastFrame, "● openai");
+    await r.press("down");
+    await waitForText(r.lastFrame, "● litellm");
+    await r.press("return");
+    await waitForText(r.lastFrame, "Gateway API base URL");
+    expect(r.lastFrame()).not.toContain("upstream-model");
+    expect(r.lastFrame()).not.toContain("arn:upstream-key");
+    await r.write(" my-model ");
+    await r.press("return");
+    await r.write(" arn:gateway-key ");
+    await r.press("return");
+    await r.write(" https://gateway.example.com/v1 ");
+    await r.press("return");
+    await waitForText(r.lastFrame, "● managed");
+    await r.press("return");
+    await waitForText(r.lastFrame, "[✓] browser");
+    await r.press("return");
+    await waitForText(r.lastFrame, "type or paste the agent's instructions");
+    await r.write("\x04");
+    await waitForText(r.lastFrame, "sent to UpdateHarness");
+    expect(r.lastFrame()).toContain('"modelId": "litellm_proxy/my-model"');
+    expect(r.lastFrame()).toContain('"apiKeyArn": "arn:gateway-key"');
+    expect(r.lastFrame()).toContain('"apiBase": "https://gateway.example.com/v1"');
+    await r.press("return");
+
+    await waitFor(() => core.harness.calls.some((call) => call.method === "updateHarness"));
+    expect(core.harness.calls.find((call) => call.method === "updateHarness")!.args[0]).toEqual({
+      harnessId: "MyHarness-abc123",
+      model: {
+        liteLlmModelConfig: {
+          modelId: "litellm_proxy/my-model",
+          apiKeyArn: "arn:gateway-key",
+          apiBase: "https://gateway.example.com/v1",
+        },
+      },
+    });
     r.unmount();
   });
 

@@ -13,6 +13,11 @@ import {
   type HarnessModelProvider,
   type HarnessModelSchema,
 } from "../../projectSchemas/harness";
+import {
+  liteLlmGatewayModelId,
+  liteLlmGatewayModelIdSchema,
+  liteLlmGatewayUrlSchema,
+} from "../harness/liteLlmGateway";
 
 const theme = darkTheme;
 
@@ -65,7 +70,7 @@ const MODEL_PROVIDERS: {
   {
     provider: "lite_llm",
     label: "litellm",
-    description: "a third-party provider through LiteLLM",
+    description: "your LiteLLM gateway",
   },
 ];
 
@@ -77,7 +82,11 @@ export function emptyHarnessModel(): HarnessModelValues {
     configs: Object.fromEntries(
       MODEL_PROVIDERS.map(({ provider }) => [
         provider,
-        { modelId: HARNESS_DEFAULT_MODEL_IDS[provider], apiKey: "", apiBase: "" },
+        {
+          modelId: provider === "lite_llm" ? "" : HARNESS_DEFAULT_MODEL_IDS[provider],
+          apiKey: "",
+          apiBase: "",
+        },
       ]),
     ) as Record<HarnessModelProvider, HarnessModelConfig>,
   };
@@ -108,7 +117,10 @@ export function toHarnessModelInput(values: HarnessModelValues): HarnessModelInp
   const apiKey = apiKeyAnswer(values);
   return {
     provider: values.provider,
-    modelId: config.modelId.trim(),
+    modelId:
+      values.provider === "lite_llm"
+        ? liteLlmGatewayModelId(config.modelId)
+        : config.modelId.trim(),
     apiKeyArn: apiKey?.startsWith(API_KEY_ARN_PREFIX) ? apiKey : undefined,
     apiBase: values.provider === "lite_llm" && apiBase !== "" ? apiBase : undefined,
   };
@@ -139,7 +151,7 @@ export function harnessModelSummary(values: HarnessModelValues): Record<string, 
     provider: providerLabel(values.provider),
     model: model.modelId,
     ...(apiKey !== undefined && { "API key": apiKey }),
-    ...(model.apiBase !== undefined && { "Custom API base URL": model.apiBase }),
+    ...(model.apiBase !== undefined && { "Gateway API base URL": model.apiBase }),
   };
 }
 
@@ -156,6 +168,7 @@ interface ModelField {
   requiredError: string;
   pattern?: RegExp;
   patternError?: string;
+  schema?: z.ZodType<string>;
 }
 
 const API_KEY_FILE_PREFIX = "file://";
@@ -168,6 +181,10 @@ function fieldError(field: ModelField, value: string): string | null {
   const trimmed = value.trim();
   if (trimmed === "") return field.required ? field.requiredError : null;
   if (field.pattern && !field.pattern.test(trimmed)) return field.patternError ?? null;
+  if (field.schema) {
+    const result = field.schema.safeParse(trimmed);
+    if (!result.success) return result.error.issues[0]!.message;
+  }
   return null;
 }
 
@@ -176,28 +193,32 @@ function modelFields(provider: HarnessModelProvider): ModelField[] {
     {
       key: "modelId",
       name: "model ID",
-      helpText: harnessModelIdHelp(
-        provider,
-        provider === "bedrock"
-          ? "a Bedrock model or inference profile ID"
-          : `the ${providerLabel(provider)} model to use`,
-      ),
-      placeholder: HARNESS_DEFAULT_MODEL_IDS[provider],
+      helpText:
+        provider === "lite_llm"
+          ? "the model alias configured in your LiteLLM gateway"
+          : harnessModelIdHelp(
+              provider,
+              provider === "bedrock"
+                ? "a Bedrock model or inference profile ID"
+                : `the ${providerLabel(provider)} model to use`,
+            ),
+      placeholder: provider === "lite_llm" ? "my-model" : HARNESS_DEFAULT_MODEL_IDS[provider],
       required: true,
       requiredError: `enter a model ID for ${providerLabel(provider)}`,
+      schema: provider === "lite_llm" ? liteLlmGatewayModelIdSchema : undefined,
     },
   ];
 
   if (provider !== "bedrock") {
-    const optional = provider === "lite_llm";
+    const gateway = provider === "lite_llm";
     fields.push({
       key: "apiKey",
       name: "API key",
-      helpText: optional
-        ? "optional · API-key providers need file://<path> or an AgentCore Identity API-key credential provider ARN. Bedrock can use AWS IAM or an API key."
+      helpText: gateway
+        ? "gateway API key via file://<path> or a credential provider ARN"
         : "file://<path> to the key file, or a credential provider ARN",
-      placeholder: optional ? "optional" : "file://./api-key.txt",
-      required: !optional,
+      placeholder: "file://./api-key.txt",
+      required: true,
       requiredError: `enter the API key file or credential provider ARN for ${providerLabel(provider)}`,
       pattern: API_KEY_PATTERN,
       patternError: API_KEY_PATTERN_ERROR,
@@ -207,11 +228,12 @@ function modelFields(provider: HarnessModelProvider): ModelField[] {
   if (provider === "lite_llm") {
     fields.push({
       key: "apiBase",
-      name: "Custom API base URL",
-      helpText: "optional · leave blank to use the model provider's default endpoint",
+      name: "Gateway API base URL",
+      helpText: "the endpoint of your LiteLLM gateway",
       placeholder: "https://…",
-      required: false,
-      requiredError: "",
+      required: true,
+      requiredError: "enter the LiteLLM gateway API base URL",
+      schema: liteLlmGatewayUrlSchema,
     });
   }
 
@@ -361,7 +383,7 @@ export function HarnessModelField({
       >
         <FormRadioGroup
           key="provider"
-          helpText="choose a model provider or gateway"
+          helpText="choose a model gateway"
           options={options}
           focusedIndex={focusedField === null ? providerIndex : undefined}
           selectedIndex={providerIndex}

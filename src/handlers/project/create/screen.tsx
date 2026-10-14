@@ -274,7 +274,7 @@ export function ProjectCreateScreen({ ctx, core }: ScreenProps) {
       </Step>
 
       {values.kind === "harness" && (
-        <Step stepKey="model" title="model provider">
+        <Step stepKey="model" title="model gateway">
           <HarnessModelField value={values.model} onChange={(model) => patch({ model })} />
         </Step>
       )}
