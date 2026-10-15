@@ -18,6 +18,127 @@ const plan = async (deployed: string, v1: string, v1StackName = STACK, pins: Pin
     pins,
   });
 
+describe("planStack with a dataset v1 has no counterpart for", () => {
+  const DATASET = "ApplicationDatasetGolden8AF7116D";
+  const withDataset = (): CfnTemplate => {
+    const deployed = templateFixture("pinned.v0");
+    deployed.Resources![DATASET] = {
+      Type: "AWS::BedrockAgentCore::Dataset",
+      Properties: {
+        DatasetName: "CompatMig_golden",
+        SchemaType: "AGENTCORE_EVALUATION_PREDEFINED_V1",
+      },
+    };
+    return deployed;
+  };
+  const planWith = (deployed: CfnTemplate) =>
+    planStack({
+      target,
+      stackName: STACK,
+      v1StackName: STACK,
+      deployed,
+      v1: templateFixture("pinned.v1"),
+      pins: [],
+    });
+
+  test("is retained first, then refactored and left in the account", async () => {
+    const { plan: stack, retain, bridge } = await planWith(withDataset());
+    expect(stack.ready).toBe(true);
+    expect(stack.retained).toEqual([
+      { logicalId: DATASET, type: "AWS::BedrockAgentCore::Dataset" },
+    ]);
+    expect([...retain!.logicalIds]).toEqual([DATASET]);
+    expect(retain!.template.Resources![DATASET]).toMatchObject({
+      DeletionPolicy: "Retain",
+      UpdateReplacePolicy: "Retain",
+    });
+    // The refactor starts from the retained stack, so its template must carry the policies.
+    expect(bridge!.Resources![DATASET]!.DeletionPolicy).toBe("Retain");
+    const removed = stack.removed.find((change) => change.logicalId === DATASET)!;
+    expect(removed.severity).toBe("info");
+    expect(removed.reason).toContain("leaves it, and its data, in the account outside the stack");
+  });
+
+  test("a dataset the stack already retains needs no update, only the refactor", async () => {
+    const deployed = withDataset();
+    deployed.Resources![DATASET]!.DeletionPolicy = "Retain";
+    deployed.Resources![DATASET]!.UpdateReplacePolicy = "Retain";
+    const { plan: stack, retain } = await planWith(deployed);
+    expect(stack.ready).toBe(true);
+    expect(retain).toBeUndefined();
+    expect(stack.retained).toHaveLength(1);
+  });
+});
+
+describe("planStack with knowledge bases and insights-only online evals", () => {
+  test("retains each resource and the dropped resources connected to it", async () => {
+    const deployed = templateFixture("pinned.v0");
+    Object.assign(deployed.Resources!, {
+      KnowledgeBase: {
+        Type: "AWS::Bedrock::KnowledgeBase",
+        Properties: { RoleArn: { "Fn::GetAtt": ["KnowledgeBaseRole", "Arn"] } },
+      },
+      KnowledgeBaseDataSource: {
+        Type: "AWS::Bedrock::DataSource",
+        Properties: { KnowledgeBaseId: { Ref: "KnowledgeBase" } },
+      },
+      KnowledgeBaseRole: {
+        Type: "AWS::IAM::Role",
+        Properties: { AssumeRolePolicyDocument: { Statement: [] } },
+      },
+      KnowledgeBasePolicy: {
+        Type: "AWS::IAM::Policy",
+        Properties: {
+          Roles: [{ Ref: "KnowledgeBaseRole" }],
+          PolicyDocument: { Statement: [] },
+        },
+      },
+      InsightsEval: {
+        Type: "AWS::BedrockAgentCore::OnlineEvaluationConfig",
+        Properties: { ExecutionRoleArn: { "Fn::GetAtt": ["InsightsRole", "Arn"] } },
+      },
+      InsightsRole: {
+        Type: "AWS::IAM::Role",
+        Properties: { AssumeRolePolicyDocument: { Statement: [] } },
+      },
+      InsightsPolicy: {
+        Type: "AWS::IAM::Policy",
+        Properties: {
+          Roles: [{ Ref: "InsightsRole" }],
+          PolicyDocument: { Statement: [] },
+        },
+      },
+    });
+
+    const { plan: stack, retain } = await planStack({
+      target,
+      stackName: STACK,
+      v1StackName: STACK,
+      deployed,
+      v1: templateFixture("pinned.v1"),
+      pins: [],
+    });
+
+    const expected = [
+      "InsightsEval",
+      "InsightsPolicy",
+      "InsightsRole",
+      "KnowledgeBase",
+      "KnowledgeBaseDataSource",
+      "KnowledgeBasePolicy",
+      "KnowledgeBaseRole",
+    ];
+    expect(stack.ready).toBe(true);
+    expect(stack.retained?.map((resource) => resource.logicalId)).toEqual(expected);
+    expect([...retain!.logicalIds]).toEqual(expected);
+    expect(
+      stack.removed
+        .filter((change) => expected.includes(change.logicalId))
+        .every((change) => change.severity === "info"),
+    ).toBe(true);
+  });
+});
+
 describe("planStack", () => {
   test("the live CompatMig stack with pinned names: 10 moves and 0 replacements", async () => {
     const { plan: stack, bridge, renames } = await plan("pinned.v0", "pinned.v1");
