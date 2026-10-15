@@ -12,10 +12,12 @@ import {
   STATE_RELATIVE_PATH,
   writeMigrationState,
 } from "./journal";
+import { gatewayCredentialNames, type CredentialSecretLookups } from "./credentialSecrets";
 import { CDK_LIBRARY_OVERRIDE_ENV, FsProjectMigrator } from "./index";
 import {
   commitAll,
   F1_DEPLOYED_STATE,
+  F1_SPEC,
   FAKE_AWS_IDENTITY,
   fakeCloudFormation,
   fakeSynth,
@@ -25,6 +27,7 @@ import {
   type FakeCloudFormationOptions,
   type V0ProjectFiles,
 } from "./migrate-test-support";
+import type { WorkspaceSynthesizer } from "./synth";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(() => Promise.all(cleanups.splice(0).map((cleanup) => cleanup())));
@@ -61,6 +64,9 @@ function migrator(
     vendedVersion?: string;
     env?: NodeJS.ProcessEnv;
     account?: string;
+    identity?: CredentialSecretLookups;
+    /** Called with each workspace the v1 app is synthesized in, before it synthesizes. */
+    onSynth?: (workspaceDirectory: string) => Promise<void>;
   } = {},
 ) {
   const stacks = options.stacks ?? [{ name: STACK, target: "default" }];
@@ -80,20 +86,97 @@ function migrator(
     createCloudFormationClient: cloudFormation.create,
     ...FAKE_AWS_IDENTITY,
     ...(options.account && { resolveAccount: async () => options.account! }),
-    synthesize: fakeSynth(
-      stacks.map((stack) => ({
-        target: stack.target,
-        stackName: stack.name,
-        template: templateFixture("pinned.v1"),
-      })),
+    synthesize: synthesizer(
+      fakeSynth(
+        stacks.map((stack) => ({
+          target: stack.target,
+          stackName: stack.name,
+          template: templateFixture("pinned.v1"),
+        })),
+      ),
+      options.onSynth,
     ),
+    ...(options.identity && { identity: options.identity }),
     env: options.env ?? {},
     poll: { intervalMs: 0, sleep: async () => {} },
   });
   return { subject, cloudFormation, run };
 }
 
+function synthesizer(
+  synthesize: WorkspaceSynthesizer,
+  onSynth?: (workspaceDirectory: string) => Promise<void>,
+): WorkspaceSynthesizer {
+  if (!onSynth) return synthesize;
+  return async (workspaceDirectory, options) => {
+    await onSynth(workspaceDirectory);
+    return synthesize(workspaceDirectory, options);
+  };
+}
+
+/** Answers each provider's secret ARN from `secrets` (an Error is thrown), recording the calls. */
+function fakeIdentity(secrets: Record<string, string | Error>) {
+  const calls: string[] = [];
+  const secretArn = (name: string) => {
+    calls.push(name);
+    const secret = secrets[name];
+    if (secret instanceof Error) throw secret;
+    return secret === undefined ? undefined : { secretArn: secret };
+  };
+  const identity: CredentialSecretLookups = {
+    getApiKeyCredentialProvider: async (name) => ({ apiKeySecretArn: secretArn(name) }) as never,
+    getOauth2CredentialProvider: async (name) => ({ clientSecretArn: secretArn(name) }) as never,
+  };
+  return Object.assign(identity, { calls });
+}
+
+const KEY_SECRET = "arn:aws:secretsmanager:us-east-1:998846730471:secret:apikey/compatA-key-AbCdEf";
+const OAUTH_SECRET =
+  "arn:aws:secretsmanager:us-east-1:998846730471:secret:oauth2/compatA-oauth-GhIjKl";
+const STATE_PATH = join("agentcore", ".cli", "deployed-state.json");
+const DENIED = "User is not authorized to perform this action";
+
+/** The secret ARN recorded for each of a target's credentials, in the file's order. */
+const secretArns = (target: unknown) =>
+  Object.values(
+    (target as { resources: { credentials: Record<string, { clientSecretArn?: string }> } })
+      .resources.credentials,
+  ).map((credential) => credential.clientSecretArn);
+
 const readJson = async (path: string) => JSON.parse(await readFile(path, "utf8"));
+
+/** F1 with its Gateway target authenticating by OAuth, so the v1 app needs compatA-oauth's secret ARN. */
+const GATEWAY_SPEC = {
+  ...F1_SPEC,
+  agentCoreGateways: F1_SPEC.agentCoreGateways.map((gateway) => ({
+    ...gateway,
+    targets: gateway.targets.map((target) => ({
+      ...target,
+      outboundAuth: { type: "OAUTH", credentialName: "compatA-oauth", scopes: ["openid"] },
+    })),
+  })),
+};
+
+/**
+ * Fails the synth as v1's CDK app does: it synthesizes every target's stack, and a
+ * Gateway credential recorded without a secret ARN throws.
+ */
+async function requireGatewaySecrets(workspace: string): Promise<void> {
+  const spec = await readJson(join(workspace, "agentcore", "agentcore.json"));
+  const state = await readJson(join(workspace, STATE_PATH));
+  for (const target of Object.values(state.targets) as {
+    resources?: { credentials?: Record<string, { clientSecretArn?: string }> };
+  }[]) {
+    for (const name of gatewayCredentialNames(spec)) {
+      const credential = target.resources?.credentials?.[name];
+      if (credential && credential.clientSecretArn === undefined) {
+        throw new Error(
+          `Credential "${name}" has no clientSecretArn in deployed state; the gateway role needs it to read the secret.`,
+        );
+      }
+    }
+  }
+}
 
 describe("FsProjectMigrator: applying a migration", () => {
   test("converts the files in place and refactors the stack, keeping physical IDs", async () => {
@@ -131,6 +214,219 @@ describe("FsProjectMigrator: applying a migration", () => {
       (call) => call.command === "ExecuteStackRefactorCommand",
     );
     expect(executed).toHaveLength(1);
+  });
+
+  test("records the secret ARNs v0 didn't, for the synth and in the migrated project", async () => {
+    const root = await committedProject();
+    const identity = fakeIdentity({ "compatA-key": KEY_SECRET, "compatA-oauth": OAUTH_SECRET });
+    const synthesized: unknown[] = [];
+    const { subject } = migrator({
+      identity,
+      onSynth: async (workspace) => {
+        synthesized.push((await readJson(join(workspace, STATE_PATH))).targets.default);
+      },
+    });
+
+    const prepared = await subject.prepare(root);
+    expect(prepared.plan.ready).toBe(true);
+    expect(prepared.plan.checks).toContainEqual({
+      name: "credential secrets",
+      ok: true,
+      message:
+        "found the secret ARNs v0 didn't record for compatA-key, compatA-oauth; migrating " +
+        "records them in agentcore/.cli/deployed-state.json",
+    });
+    expect(prepared.plan.changes).toContainEqual({
+      path: "agentcore/.cli/deployed-state.json",
+      kind: "modified",
+    });
+    expect(synthesized.map(secretArns)).toEqual([[KEY_SECRET, OAUTH_SECRET]]);
+    // Planning leaves the project's deployed state alone.
+    expect(await readJson(join(root, STATE_PATH))).toEqual(F1_DEPLOYED_STATE);
+
+    const result = await prepared.apply();
+    await prepared.dispose();
+
+    expect(result.migrated).toBe(true);
+    const state = await readJson(join(root, STATE_PATH));
+    expect(secretArns(state.targets.default)).toEqual([KEY_SECRET, OAUTH_SECRET]);
+    expect(state.targets.default.resources.memories).toEqual(
+      F1_DEPLOYED_STATE.targets.default.resources.memories,
+    );
+    expect(identity.calls).toEqual(["compatA-key", "compatA-oauth"]);
+  });
+
+  test("only warns when a credential no Gateway target uses has no readable secret ARN", async () => {
+    const root = await committedProject();
+    const identity = fakeIdentity({
+      "compatA-key": new Error(DENIED),
+      "compatA-oauth": OAUTH_SECRET,
+    });
+    const { subject } = migrator({ identity });
+
+    const plan = await subject.plan(root);
+
+    // F1's only Gateway target authenticates with nothing, so neither credential blocks.
+    expect(plan.ready).toBe(true);
+    expect(plan.checks.find((entry) => entry.name === "credential secrets")?.ok).toBe(true);
+    expect(plan.warnings).toContainEqual(
+      expect.stringContaining(
+        `credential compatA-key, and it couldn't be found: GetApiKeyCredentialProvider failed (${DENIED})`,
+      ),
+    );
+  });
+
+  test("blocks with the credential named when a Gateway target's secret ARN can't be read", async () => {
+    const root = await committedProject({ spec: GATEWAY_SPEC });
+    const identity = fakeIdentity({
+      "compatA-key": KEY_SECRET,
+      "compatA-oauth": new Error(DENIED),
+    });
+    const { subject } = migrator({ identity });
+
+    const plan = await subject.plan(root);
+
+    expect(plan.problems).toEqual([]);
+    expect(plan.ready).toBe(false);
+    const check = plan.checks.find((entry) => entry.name === "credential secrets");
+    expect(check?.ok).toBe(false);
+    expect(check?.message).toContain(
+      `compatA-oauth: GetOauth2CredentialProvider failed (${DENIED})`,
+    );
+    expect(await readJson(join(root, STATE_PATH))).toEqual(F1_DEPLOYED_STATE);
+  });
+
+  test("records every same-account target's secret ARNs, so the v1 app synthesizes all of them", async () => {
+    // Both targets in one account, in different regions, with a Gateway authenticating by OAuth.
+    const root = await committedProject({ ...twoTargets(), spec: GATEWAY_SPEC });
+    const stacks = [
+      { name: STACK, target: "default" },
+      { name: PROD_STACK, target: "prod" },
+    ];
+    const identity = fakeIdentity({ "compatA-key": KEY_SECRET, "compatA-oauth": OAUTH_SECRET });
+    const first = migrator({ stacks, identity, onSynth: requireGatewaySecrets });
+    const prepared = await first.subject.prepare(root, { target: "default" });
+    expect(prepared.plan.ready).toBe(true);
+    expect(prepared.plan.checks).toContainEqual(
+      expect.objectContaining({
+        name: "credential secrets",
+        ok: true,
+        message: expect.stringContaining("compatA-oauth (target prod)"),
+      }),
+    );
+    await prepared.apply();
+    await prepared.dispose();
+
+    const written = await readJson(join(root, STATE_PATH));
+    expect(secretArns(written.targets.default)).toEqual([KEY_SECRET, OAUTH_SECRET]);
+    expect(secretArns(written.targets.prod)).toEqual([KEY_SECRET, OAUTH_SECRET]);
+
+    // The pending run finds every ARN recorded, so it synthesizes without looking any up.
+    const calls = identity.calls.length;
+    const rerun = migrator({
+      stacks,
+      sharedCloudFormation: first.cloudFormation,
+      identity,
+      onSynth: requireGatewaySecrets,
+    });
+    const finishing = await rerun.subject.prepare(root, { target: "prod" });
+    expect(finishing.plan.finishPending).toBe(true);
+    expect(finishing.plan.ready).toBe(true);
+    expect(finishing.plan.changes).toEqual([]);
+    expect(identity.calls).toHaveLength(calls);
+    await finishing.apply();
+    await finishing.dispose();
+  });
+
+  test("the pending run records the secret ARNs for its synth, without writing the project", async () => {
+    const root = await committedProject({ ...twoTargets(), spec: GATEWAY_SPEC });
+    const stacks = [
+      { name: STACK, target: "default" },
+      { name: PROD_STACK, target: "prod" },
+    ];
+    // The first run has no Identity client, as a CLI from before the fix would, so it records none.
+    const first = migrator({ stacks });
+    const prepared = await first.subject.prepare(root, { target: "default" });
+    await prepared.apply();
+    await prepared.dispose();
+
+    const identity = fakeIdentity({ "compatA-key": KEY_SECRET, "compatA-oauth": OAUTH_SECRET });
+    const rerun = migrator({
+      stacks,
+      sharedCloudFormation: first.cloudFormation,
+      identity,
+      onSynth: requireGatewaySecrets,
+    });
+    const finishing = await rerun.subject.prepare(root, { target: "prod" });
+    expect(finishing.plan.ready).toBe(true);
+    expect(finishing.plan.changes).toEqual([]);
+    await finishing.dispose();
+    expect(secretArns((await readJson(join(root, STATE_PATH))).targets.prod)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test("blocks when a target in another account has a Gateway credential without its secret ARN", async () => {
+    const files = twoTargets();
+    const root = await committedProject({
+      ...files,
+      spec: GATEWAY_SPEC,
+      targets: [
+        { name: "default", account: "998846730471", region: "us-east-1" },
+        { name: "prod", account: "111111111111", region: "us-west-2" },
+      ],
+    });
+    const identity = fakeIdentity({ "compatA-key": KEY_SECRET, "compatA-oauth": OAUTH_SECRET });
+    const { subject } = migrator({ identity, onSynth: requireGatewaySecrets });
+
+    const plan = await subject.plan(root, { target: "default" });
+
+    expect(plan.ready).toBe(false);
+    const check = plan.checks.find((entry) => entry.name === "credential secrets");
+    expect(check?.ok).toBe(false);
+    expect(check?.message).toContain(
+      "Target prod is in account 111111111111 (us-west-2), but the active credentials are for " +
+        "account 998846730471. v1's CDK app synthesizes every target's stack, so it needs the " +
+        "secret ARNs of compatA-oauth there too",
+    );
+  });
+
+  test("a target in another account with every secret ARN recorded doesn't block", async () => {
+    const files = twoTargets();
+    const state = files.deployedState as typeof F1_DEPLOYED_STATE & {
+      targets: { prod: typeof F1_DEPLOYED_STATE.targets.default };
+    };
+    const credentials = state.targets.prod.resources.credentials;
+    const root = await committedProject({
+      ...files,
+      spec: GATEWAY_SPEC,
+      targets: [
+        { name: "default", account: "998846730471", region: "us-east-1" },
+        { name: "prod", account: "111111111111", region: "us-west-2" },
+      ],
+      deployedState: {
+        targets: {
+          default: state.targets.default,
+          prod: {
+            resources: {
+              ...state.targets.prod.resources,
+              credentials: {
+                "compatA-key": { ...credentials["compatA-key"], clientSecretArn: KEY_SECRET },
+                "compatA-oauth": { ...credentials["compatA-oauth"], clientSecretArn: OAUTH_SECRET },
+              },
+            },
+          },
+        },
+      },
+    });
+    const identity = fakeIdentity({ "compatA-key": KEY_SECRET, "compatA-oauth": OAUTH_SECRET });
+    const { subject } = migrator({ identity, onSynth: requireGatewaySecrets });
+
+    const plan = await subject.plan(root, { target: "default" });
+
+    expect(plan.ready).toBe(true);
+    expect(plan.checks.every((check) => check.ok)).toBe(true);
   });
 
   test("refuses to apply when the tree changed after planning", async () => {

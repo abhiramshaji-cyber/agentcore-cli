@@ -44,6 +44,12 @@ import {
   type MigrationState,
 } from "./journal";
 import { convertHarness } from "./convertHarness";
+import {
+  backfillCredentialSecrets,
+  gatewayCredentialNames,
+  type CredentialSecretLookups,
+  type TargetAccess,
+} from "./credentialSecrets";
 import { checkGitGate } from "./gitGate";
 import {
   AWS_TARGETS_RELATIVE_PATH,
@@ -94,6 +100,8 @@ export type FsProjectMigratorConfig = {
   poll?: PollOptions;
   /** Builds the store large templates are uploaded to; defaults to the CDK bootstrap bucket. */
   templateStore?: (target: AwsDeploymentTarget) => TemplateStore;
+  /** Reads the secret ARNs v0 didn't record; without it, deployed state is used as v0 left it. */
+  identity?: CredentialSecretLookups;
 };
 
 /** A deployment target with a deployed stack, and what planning has read about it. */
@@ -145,6 +153,7 @@ export class FsProjectMigrator implements ProjectMigrator {
   private readonly env: NodeJS.ProcessEnv;
   private readonly poll?: PollOptions;
   private readonly templateStore?: (target: AwsDeploymentTarget) => TemplateStore;
+  private readonly identity?: CredentialSecretLookups;
 
   constructor(config: FsProjectMigratorConfig) {
     this.runner = config.runner ?? runProcess;
@@ -160,6 +169,7 @@ export class FsProjectMigrator implements ProjectMigrator {
       config.synthesize ?? createWorkspaceSynthesizer({ runner: this.runner, env: this.env });
     if (config.poll) this.poll = config.poll;
     if (config.templateStore) this.templateStore = config.templateStore;
+    if (config.identity) this.identity = config.identity;
   }
 
   public async plan(rootPath: string, options: MigrationPlanOptions = {}): Promise<MigrationPlan> {
@@ -249,6 +259,11 @@ export class FsProjectMigrator implements ProjectMigrator {
     if (selection.check) checks.push(selection.check);
     const { selected } = selection;
     if (selected) await this.readSelectedStack(selected, checks, skippedStacks, options);
+    // A project that doesn't convert isn't synthesized, so its secrets aren't needed.
+    const secrets =
+      problems.length > 0
+        ? { warnings: [] }
+        : await this.backfillSecrets(rootPath, v0Spec, targets.targets, selected, checks);
 
     const warnings = [
       ...converted.warnings,
@@ -257,6 +272,7 @@ export class FsProjectMigrator implements ProjectMigrator {
       ...credentialNameWarnings(v0Spec.credentials.map((credential) => credential.name)),
       ...library.warnings,
       ...overrideWarnings(cdkLibraryOverride),
+      ...secrets.warnings,
     ];
 
     const workspace = await buildMigrationWorkspace({
@@ -266,6 +282,7 @@ export class FsProjectMigrator implements ProjectMigrator {
         yaml === undefined ? [] : [{ directory, yaml }],
       ),
       assetSource: this.assetSource,
+      ...(secrets.deployedState !== undefined && { deployedState: secrets.deployedState }),
     });
     try {
       // The selected stack is planned whatever else failed, so one run shows
@@ -383,6 +400,66 @@ export class FsProjectMigrator implements ProjectMigrator {
             credentials: entry.credentials!,
             region: target.region,
           })),
+    };
+  }
+
+  /**
+   * Fills in the secret ARNs v0 didn't record for every deployed target's
+   * credentials, since the v1 app synthesizes every target's stack; returns
+   * deployed-state.json's new contents when any were. Only once the selected
+   * stack was read, so the active credentials are known to work.
+   */
+  private async backfillSecrets(
+    rootPath: string,
+    spec: { credentials: { name: string; authorizerType: string }[] },
+    targets: AwsDeploymentTarget[],
+    selected: DeployedTarget | undefined,
+    checks: MigrationCheck[],
+  ): Promise<{ deployedState?: string; warnings: string[] }> {
+    if (!this.identity || selected?.template === undefined) return { warnings: [] };
+    const { deployedState, check, warnings } = await backfillCredentialSecrets({
+      identity: this.identity,
+      rootPath,
+      credentials: spec.credentials,
+      gatewayCredentials: gatewayCredentialNames(spec),
+      targets,
+      access: this.targetAccess(selected),
+    });
+    if (check) checks.push(check);
+    return { ...(deployedState !== undefined && { deployedState }), warnings };
+  }
+
+  /**
+   * Reads a target's providers with the credentials migrate resolves for its
+   * region, which reach any region of their own account. Resolved once per
+   * region, starting from the ones the selected stack was read with.
+   */
+  private targetAccess(
+    selected: DeployedTarget,
+  ): (target: AwsDeploymentTarget) => Promise<TargetAccess> {
+    type Resolved = { credentials: CdkCredentialProvider; account: string };
+    const byRegion = new Map<string, Promise<Resolved>>([
+      [
+        selected.target.region,
+        Promise.resolve({ credentials: selected.credentials!, account: selected.target.account }),
+      ],
+    ]);
+    return async (target) => {
+      let resolved = byRegion.get(target.region);
+      if (!resolved) {
+        resolved = (async () => {
+          const credentials = await this.resolveCredentials(target.region);
+          return { credentials, account: await this.resolveAccount(target.region, credentials) };
+        })();
+        byRegion.set(target.region, resolved);
+      }
+      try {
+        const { credentials, account } = await resolved;
+        if (account !== target.account) return { account };
+        return { options: { region: target.region, credentials } };
+      } catch (error) {
+        return { error: (error as Error).message };
+      }
     };
   }
 
@@ -566,11 +643,30 @@ export class FsProjectMigrator implements ProjectMigrator {
     }
     try {
       if (selected?.template !== undefined) {
+        const spec = JSON.parse(await readFile(join(rootPath, SPEC_RELATIVE_PATH), "utf8")) as {
+          credentials?: unknown;
+        };
+        // Only the synth reads it here: a pending migration's files are already written
+        // (and the run that wrote them recorded every reachable target's ARNs).
+        const secrets = await this.backfillSecrets(
+          rootPath,
+          {
+            ...spec,
+            credentials: Array.isArray(spec.credentials)
+              ? (spec.credentials as { name: string; authorizerType: string }[])
+              : [],
+          },
+          (await this.readTargets(rootPath)).targets,
+          selected,
+          checks,
+        );
+        warnings.push(...secrets.warnings);
         workspace = await buildMigrationWorkspace({
           rootPath,
-          spec: JSON.parse(await readFile(join(rootPath, SPEC_RELATIVE_PATH), "utf8")),
+          spec,
           harnesses: [],
           assetSource: this.assetSource,
+          ...(secrets.deployedState !== undefined && { deployedState: secrets.deployedState }),
         });
         const result = await this.planStacks(workspace.directory, [selected], checks, [], options);
         planned = result.planned[0];
