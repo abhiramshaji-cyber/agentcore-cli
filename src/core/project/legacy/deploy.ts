@@ -5,7 +5,6 @@ export const V0_CLI_PACKAGE = "@aws/agentcore@0";
 export type V0DeployInput = {
   projectRoot: string;
   target: string;
-  region: string;
   yes: boolean;
   json: boolean;
 };
@@ -18,6 +17,11 @@ export async function executeV0Deploy(
   input: V0DeployInput,
   runner: InheritedProcessRunner = runInheritedProcess,
 ): Promise<number> {
+  // v0 has no --region flag -- it resolves region per target from
+  // aws-targets.json, falling back to AWS_REGION/AWS_DEFAULT_REGION or the AWS
+  // config file. Don't forward one: process.env below already carries through
+  // whatever AWS_REGION the user has set, and forcing a different value here
+  // would outrank v0's own (more correct) profile-aware fallback.
   const args = [
     "npx",
     "--yes",
@@ -25,8 +29,6 @@ export async function executeV0Deploy(
     "deploy",
     "--target",
     input.target,
-    "--region",
-    input.region,
     ...(input.yes ? ["--yes"] : []),
     ...(input.json ? ["--json"] : []),
   ];

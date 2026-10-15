@@ -268,7 +268,6 @@ describe("project deploy handler", () => {
         {
           projectRoot,
           target: "default",
-          region: "eu-west-2",
           yes: flag === "--yes",
           json: flag === "--json",
         },
@@ -277,7 +276,8 @@ describe("project deploy handler", () => {
       expect(subject.io.stderr()).toBe(
         flag === "--json"
           ? ""
-          : "This is a v0 project; running the latest v0 AgentCore CLI deploy in compatibility mode.",
+          : "--region is ignored for v0 projects; v0 resolves region from aws-targets.json.\n" +
+              "This is a v0 project; running the latest v0 AgentCore CLI deploy in compatibility mode.",
       );
       expect(
         await Promise.all([readFile(specPath, "utf8"), readFile(manifestPath, "utf8")]),
