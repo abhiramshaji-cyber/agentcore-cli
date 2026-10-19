@@ -531,12 +531,8 @@ add a Runtime to the current project
 **Options**
 
 - `--name <name>`: the name of the Runtime (required)
-- `--type <type>`: create generates new agent code (the default); import translates a Bedrock Agent version
-- `--template <template>`: template for the Runtime code (default: agent-python-minimal); available templates listed below
-- `--model-provider <model-provider>`: model provider for supported templates: bedrock, anthropic, open\_ai (or openai), openai\_compatible, gemini, or lite\_llm (or litellm)
-- `--model-id <model-id>`: model id for the scaffolded Runtime code, overriding the provider's default (required with openai\_compatible, and with litellm in China regions)
-- `--api-key <api-key>`: API key for non-Bedrock providers on supported templates; '-' for stdin, 'file://path' for file
-- `--api-base <api-base>`: base URL of the endpoint for --model-provider openai\_compatible (required with it, not accepted with other providers)
+- `--language <language>`: language you will write the Runtime in: python or typescript (required unless --agent-id imports a Bedrock Agent)
+- `--protocol <protocol>`: protocol the Runtime serves: HTTP (default), MCP, A2A, or AGUI
 - `--description <description>`: an optional description of the Runtime
 - `--tags <tags...>`: tags as key=value (repeatable) or JSON object
 - `--environment-variables <environment-variables>`: environment variables (JSON object of key/value strings)
@@ -549,9 +545,9 @@ add a Runtime to the current project
 - `--authorizer-type <authorizer-type>`: inbound authorizer type (AWS\_IAM or CUSTOM\_JWT)
 - `--authorizer-configuration <authorizer-configuration>`: inbound authorizer configuration (JSON)
 - `--request-header-allowlist <request-header-allowlist...>`: request headers to pass through to the Runtime
-- `--agent-id <agent-id>`: Bedrock Agent ID to import (requires --type import)
-- `--agent-alias-id <agent-alias-id>`: Bedrock Agent Alias ID selecting the version to import; must point at a prepared version, not DRAFT (requires --type import)
-- `--framework <framework>`: agent framework for an imported Bedrock Agent: strands or langgraph (requires --type import)
+- `--agent-id <agent-id>`: Bedrock Agent ID to import; translates that agent version into runtime code instead of writing docs
+- `--agent-alias-id <agent-alias-id>`: Bedrock Agent Alias ID selecting the version to import; must point at a prepared version, not DRAFT (requires --agent-id)
+- `--framework <framework>`: agent framework for an imported Bedrock Agent: strands or langgraph (requires --agent-id)
 
 #### `agentcore add runtime-endpoint`
 
