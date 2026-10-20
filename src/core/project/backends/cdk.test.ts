@@ -315,7 +315,7 @@ describe("CdkBackend.build", () => {
     const subject = harness();
 
     expect(await collect(subject.backend.build(input))).toEqual([
-      { type: "step", message: "Synthesizing CloudFormation templates" },
+      { type: "step", message: "synthesizing CloudFormation templates" },
     ]);
     expect(subject.commands).toEqual([{ command: synthCommand(input), cwd: cdkDirectory(input) }]);
   });
@@ -335,7 +335,7 @@ describe("CdkBackend.build", () => {
         type: "warning",
         message: expect.stringContaining("Update the CDK dependency, then rebuild or redeploy."),
       },
-      { type: "step", message: "Synthesizing CloudFormation templates" },
+      { type: "step", message: "synthesizing CloudFormation templates" },
     ]);
     expect(subject.commands).toEqual([{ command: synthCommand(input), cwd: cdkDirectory(input) }]);
   });
@@ -347,7 +347,7 @@ describe("CdkBackend.build", () => {
     const subject = harness({ synthOutput: ["line one\nline t", "wo\ntrailing partial"] });
 
     expect(await collect(subject.backend.build(input))).toEqual([
-      { type: "step", message: "Synthesizing CloudFormation templates" },
+      { type: "step", message: "synthesizing CloudFormation templates" },
       { type: "output", line: "line one" },
       { type: "output", line: "line two" },
       { type: "output", line: "trailing partial" },
@@ -412,12 +412,12 @@ describe("CdkBackend.deploy", () => {
     const deployed = await collectDeploy(subject.backend.deploy(input, deployInput()));
 
     expect(deployed.events).toEqual([
-      { type: "step", message: `Verifying AWS account ${TARGET.account}` },
-      { type: "step", message: "Synthesizing CloudFormation templates" },
-      { type: "step", message: "Enabling CloudWatch Transaction Search" },
+      { type: "step", message: `verifying AWS account ${TARGET.account}` },
+      { type: "step", message: "synthesizing CloudFormation templates" },
+      { type: "step", message: "enabling CloudWatch Transaction Search" },
       {
         type: "step",
-        message: "Deploying AgentCore-example-default-0 (usually takes a few minutes)",
+        message: "deploying AgentCore-example-default-0 (usually takes a few minutes)",
       },
     ]);
     expect(subject.transactionSearchRegions).toEqual([TARGET.region]);
@@ -458,7 +458,7 @@ describe("CdkBackend.deploy", () => {
 
     expect(deployed.events).not.toContainEqual({
       type: "step",
-      message: "Enabling CloudWatch Transaction Search",
+      message: "enabling CloudWatch Transaction Search",
     });
     expect(subject.transactionSearchRegions).toEqual([]);
   });
@@ -474,12 +474,12 @@ describe("CdkBackend.deploy", () => {
     const deployed = await collectDeploy(subject.backend.deploy(input, deployInput()));
 
     const deployStep = deployed.events.findIndex(
-      (event) => event.type === "step" && event.message.startsWith("Deploying"),
+      (event) => event.type === "step" && event.message.startsWith("deploying"),
     );
     expect(deployed.events.slice(deployStep)).toEqual([
       {
         type: "step",
-        message: "Deploying AgentCore-example-default-0 (usually takes a few minutes)",
+        message: "deploying AgentCore-example-default-0 (usually takes a few minutes)",
       },
       { type: "output", line: "AgentCore-example-default-0 | 4/12 | CREATE_IN_PROGRESS" },
     ]);
@@ -596,7 +596,7 @@ describe("CdkBackend.deploy", () => {
     const handed: CredentialProvisionInput[] = [];
     const provisionCredentials: CredentialProvisioner = async function* (_project, provisionInput) {
       handed.push(provisionInput);
-      yield { type: "step", message: "Preparing credential provider 'openai-key'" };
+      yield { type: "step", message: "preparing credential provider 'openai-key'" };
       return { "openai-key": { credentialProviderArn: "arn:apikey:openai-key" } };
     };
     const subject = harness({
@@ -614,8 +614,8 @@ describe("CdkBackend.deploy", () => {
     // The credential step runs (and its ARNs are recorded) before synthesis, so
     // the assembly is synthesized against a state file that already describes them.
     const messages = stepMessages(deployed.events);
-    expect(messages.indexOf("Preparing credential provider 'openai-key'")).toBeLessThan(
-      messages.indexOf("Synthesizing CloudFormation templates"),
+    expect(messages.indexOf("preparing credential provider 'openai-key'")).toBeLessThan(
+      messages.indexOf("synthesizing CloudFormation templates"),
     );
 
     // The pre-synth credentials write and the post-deploy stack-ARN write merge
@@ -678,7 +678,7 @@ describe("CdkBackend.deploy", () => {
 
     expect(deployed.events).toContainEqual({
       type: "step",
-      message: "Skipping Transaction Search: denied: logs:PutResourcePolicy",
+      message: "skipping Transaction Search: denied: logs:PutResourcePolicy",
     });
     // The stack still deploys — Transaction Search never blocks it.
     expect(deployed.result).toEqual({ outputs: { RuntimeArn: "arn:runtime" } });
@@ -795,7 +795,7 @@ describe("CdkBackend.deploy", () => {
     expect(deployed.result).toEqual({ outputs: {}, tornDown: true });
     expect(deployed.events).toContainEqual({
       type: "step",
-      message: "Removing stack AgentCore-example-default-0",
+      message: "removing stack AgentCore-example-default-0",
     });
     // Destroyed explicitly, rather than by deploying an empty template and
     // letting the Toolkit infer a deletion.
@@ -820,7 +820,7 @@ describe("CdkBackend.deploy", () => {
     const removals: string[] = [];
     const removeCredentials: CredentialRemover = async function* (project) {
       removals.push(project.name);
-      yield { type: "step", message: "Removing credential provider 'wallet'" };
+      yield { type: "step", message: "removing credential provider 'wallet'" };
     };
     const subject = harness({ removeCredentials });
 
@@ -831,8 +831,8 @@ describe("CdkBackend.deploy", () => {
     expect(removals).toEqual(["example"]);
     // After the destroy, since a resource in the stack may still be using it.
     const messages = stepMessages(deployed.events);
-    expect(messages.indexOf("Removing stack AgentCore-example-default-0")).toBeLessThan(
-      messages.indexOf("Removing credential provider 'wallet'"),
+    expect(messages.indexOf("removing stack AgentCore-example-default-0")).toBeLessThan(
+      messages.indexOf("removing credential provider 'wallet'"),
     );
   });
 
@@ -864,7 +864,7 @@ describe("CdkBackend.deploy", () => {
     const handed: CredentialRemovalInput[] = [];
     const removeCredentials: CredentialRemover = async function* (_project, removalInput) {
       handed.push(removalInput);
-      yield { type: "step", message: "Removing credential provider 'wallet'" };
+      yield { type: "step", message: "removing credential provider 'wallet'" };
     };
     const subject = harness({ removeCredentials });
 
@@ -915,13 +915,13 @@ describe("CdkBackend.deploy", () => {
       }),
     );
     const provisionCredentials: CredentialProvisioner = async function* () {
-      yield { type: "step", message: "Preparing credential provider 'example_default_openai-key'" };
+      yield { type: "step", message: "preparing credential provider 'example_default_openai-key'" };
       return { "openai-key": { credentialProviderArn: "arn:apikey:openai-key" } };
     };
     const handed: CredentialRemovalInput[] = [];
     const removeCredentials: CredentialRemover = async function* (_project, removalInput) {
       handed.push(removalInput);
-      yield { type: "step", message: "Removing credential provider 'example_default_wallet'" };
+      yield { type: "step", message: "removing credential provider 'example_default_wallet'" };
     };
     const subject = harness({ provisionCredentials, removeCredentials });
 
@@ -940,8 +940,8 @@ describe("CdkBackend.deploy", () => {
     // provider until this deploy removed the reference.
     const messages = stepMessages(deployed.events);
     expect(
-      messages.indexOf("Deploying AgentCore-example-default-0 (usually takes a few minutes)"),
-    ).toBeLessThan(messages.indexOf("Removing credential provider 'example_default_wallet'"));
+      messages.indexOf("deploying AgentCore-example-default-0 (usually takes a few minutes)"),
+    ).toBeLessThan(messages.indexOf("removing credential provider 'example_default_wallet'"));
     expect(deployed.result).toEqual({ outputs: {} });
   });
 
@@ -987,7 +987,7 @@ describe("CdkBackend.deploy", () => {
     ]);
     expect(deployed.events).toContainEqual({
       type: "step",
-      message: `Bootstrapping aws://${TARGET.account}/${TARGET.region}`,
+      message: `bootstrapping aws://${TARGET.account}/${TARGET.region}`,
     });
   });
 
