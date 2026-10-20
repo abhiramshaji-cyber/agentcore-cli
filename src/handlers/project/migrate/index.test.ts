@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRootHandler } from "../../index";
-import { ProjectStateError, SilentCLIError } from "../../../errors";
+import { AgentCoreCLIError, ERROR_SOURCE, SilentCLIError } from "../../../errors";
 import {
   CDK_LIBRARY_OVERRIDE_ENV,
   FsProjectMigrator,
@@ -39,6 +39,7 @@ import {
   formatResultSummary,
   formatStackPlan,
   MIGRATION_DOCS_URL,
+  MIGRATION_FAILURE_GUIDANCE,
   overrideInstallCommand,
   reportStamp,
 } from "./index";
@@ -293,14 +294,20 @@ describe("agentcore migrate, planning", () => {
 
   test("refuses a project that is already v1", async () => {
     await inV1Project();
-    await expect(cli().run()).rejects.toThrow(ALREADY_V1_MESSAGE);
+    await expect(cli().run()).rejects.toThrow(
+      `${ALREADY_V1_MESSAGE}\n${MIGRATION_FAILURE_GUIDANCE}`,
+    );
   });
 
   test("--json writes the already-v1 error to stdout", async () => {
     await inV1Project();
     const subject = cli();
-    await expect(subject.run("--json")).rejects.toThrow(ProjectStateError);
-    expect(JSON.parse(subject.io.stdout())).toEqual({ error: ALREADY_V1_MESSAGE });
+    await expect(subject.run("--json")).rejects.toThrow(
+      `${ALREADY_V1_MESSAGE}\n${MIGRATION_FAILURE_GUIDANCE}`,
+    );
+    expect(JSON.parse(subject.io.stdout())).toEqual({
+      error: `${ALREADY_V1_MESSAGE}\n${MIGRATION_FAILURE_GUIDANCE}`,
+    });
   });
 });
 
@@ -346,6 +353,7 @@ function scriptedCli(
     stdin?: string;
     plan?: Partial<MigrationPlan>;
     failReports?: boolean;
+    prepareError?: Error;
   } = {},
 ) {
   const io = testIO({
@@ -371,10 +379,11 @@ function scriptedCli(
       calls.reports.push({ fileName, contents });
       return `agentcore/.cli/migrate/${fileName}`;
     },
-    prepare: async (rootPath, prepareOptions) => (
-      calls.targets.push(prepareOptions?.target),
-      prepareOptions?.onStep?.("Reading stack S"),
-      {
+    prepare: async (rootPath, prepareOptions) => {
+      if (options.prepareError) throw options.prepareError;
+      calls.targets.push(prepareOptions?.target);
+      prepareOptions?.onStep?.("Reading stack S");
+      return {
         plan: planFor(rootPath),
         apply: async (applyOptions) => {
           calls.apply++;
@@ -385,8 +394,8 @@ function scriptedCli(
         dispose: async () => {
           calls.dispose++;
         },
-      }
-    ),
+      };
+    },
   };
   const root = createRootHandler(new TestCoreClient({ projectMigrator }), {
     io: io.io,
@@ -545,6 +554,54 @@ describe("agentcore migrate, keeping unsupported resources", () => {
 });
 
 describe("agentcore migrate, applying", () => {
+  test("a failed v1 synth includes feedback guidance after the not-ready plan", async () => {
+    await inCommittedV0Project();
+    const subject = scriptedCli({
+      ready: false,
+      plan: {
+        checks: [
+          {
+            name: "v1 synth",
+            ok: false,
+            message:
+              'AgentCore CDK synthesis failed: Credential "OrdersApi" has no clientSecretArn in deployed state.',
+          },
+        ],
+      },
+    });
+
+    await expect(subject.run()).rejects.toBeInstanceOf(SilentCLIError);
+    expect(subject.io.stdout()).toContain(
+      'v1 synth: AgentCore CDK synthesis failed: Credential "OrdersApi" has no clientSecretArn',
+    );
+    expect(subject.io.stderr()).toContain(MIGRATION_FAILURE_GUIDANCE);
+  });
+
+  test.each([
+    ["internal", new Error("unexpected migration failure")],
+    [
+      "service",
+      new AgentCoreCLIError("migration service unavailable", {
+        source: ERROR_SOURCE.SERVICE,
+      }),
+    ],
+  ])("adds feedback guidance to %s failures", async (_source, prepareError) => {
+    await inCommittedV0Project();
+    const subject = scriptedCli({ prepareError });
+    const originalMessage = prepareError.message;
+
+    let caught: AgentCoreCLIError | undefined;
+    try {
+      await subject.run();
+    } catch (error) {
+      caught = AgentCoreCLIError.fromError(error);
+    }
+    if (!caught) throw new Error("expected migrate to fail");
+    expect(caught.message).toBe(`${prepareError.message}\n${MIGRATION_FAILURE_GUIDANCE}`);
+    expect(caught).not.toBe(prepareError);
+    expect(prepareError.message).toBe(originalMessage);
+  });
+
   test("passes --target to the plan", async () => {
     await inCommittedV0Project();
     const subject = scriptedCli();
@@ -634,6 +691,7 @@ describe("agentcore migrate, applying", () => {
 
     await expect(subject.run("--yes")).rejects.toBeInstanceOf(SilentCLIError);
     expect(subject.calls.apply).toBe(0);
+    expect(subject.io.stderr()).toContain(MIGRATION_FAILURE_GUIDANCE);
   });
 
   test("on a terminal, asks first and applies on yes", async () => {
@@ -661,6 +719,7 @@ describe("agentcore migrate, applying", () => {
 
     expect(subject.calls.apply).toBe(0);
     expect(subject.io.stdout()).toContain("Migration cancelled. Nothing was changed.");
+    expect(subject.io.stderr()).not.toContain(MIGRATION_FAILURE_GUIDANCE);
   });
 
   test("--json without --yes only renders the plan", async () => {
@@ -699,6 +758,7 @@ describe("agentcore migrate, applying", () => {
 
     await expect(subject.run("--yes")).rejects.toBeInstanceOf(SilentCLIError);
     expect(subject.io.stdout()).toContain("the project's files were put back: it's v0 again");
+    expect(subject.io.stderr()).toContain(MIGRATION_FAILURE_GUIDANCE);
   });
 });
 
