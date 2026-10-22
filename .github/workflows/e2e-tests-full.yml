@@ -9,7 +9,7 @@ on:
         description: 'Branch of CDK constructs repo to build from'
         default: 'main'
   push:
-    branches: [main, 'feat/**']
+    branches: [main, v0.x, 'feat/**']
 
 env:
   AGENTCORE_TELEMETRY_DISABLED: '1'
@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-node@v7
         with:
           node-version: '20.x'

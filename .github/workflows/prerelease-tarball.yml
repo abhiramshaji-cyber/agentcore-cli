@@ -2,7 +2,7 @@ name: Prerelease Tarball
 
 on:
   push:
-    branches: [main]
+    branches: [main, v0.x]
   # Manually trigger to pull in the latest CDK constructs changes
   workflow_dispatch:
 
@@ -56,6 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION_SUFFIX: ${{ steps.version.outputs.suffix }}
+          CLI_BRANCH: ${{ github.ref_name }}
         run: |
           TAG="prerelease"
 
@@ -66,7 +67,7 @@ jobs:
           gh release create "$TAG" \
             "${TARBALL_BASE}.tgz" \
             --title "Prerelease" \
-            --notes "Auto-generated tarball from the latest commit on main.
+            --notes "Auto-generated tarball from the latest commit on ${CLI_BRANCH}.
 
           Version: \`${VERSION_SUFFIX}\` (cli-cdk)
 
