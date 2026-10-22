@@ -52,7 +52,7 @@ point — write once, compose freely.
 Dispatch `release-prepare` with a bump and a channel, review the release PR it opens, merge it.
 `release-publish` then publishes the merged package.json version.
 
-Publishing listens for pushes to `refactor`, not PR events. It looks up the pushed commit's
+Publishing listens for pushes to `refactor` and `v1.x`, not PR events. It looks up the pushed commit's
 associated PRs and proceeds only when that exact commit
 is the merge of a `release/v*` PR opened by `agentcore-devx-automation[bot]` (account ID
 `282717993`) from this repository into the target branch. Manually opened release PRs,
