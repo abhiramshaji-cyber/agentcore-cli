@@ -8,8 +8,8 @@ on:
   # for a release whose merge push never ran.
   workflow_dispatch:
   push:
-    # TODO: switch to main once the refactor lands and this workflow is allowlisted there.
-    branches: [refactor]
+    # Keep both names until the v1.x runner allowlisting and refactor renaming are completed.
+    branches: [refactor, v1.x]
 
 jobs:
   check-release:
@@ -79,7 +79,7 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20.x
           registry-url: https://registry.npmjs.org

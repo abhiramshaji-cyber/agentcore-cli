@@ -1,6 +1,6 @@
 {
   "name": "@aws/agentcore",
-  "version": "1.0.0-rc.7",
+  "version": "1.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/aws/agentcore-cli.git"
@@ -52,6 +52,7 @@
   "devDependencies": {
     "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
     "@types/bun": "latest",
+    "@types/cross-spawn": "^6.0.6",
     "@types/react": "^19.2.17",
     "@types/semver": "^7.8.0",
     "@types/ws": "^8.18.1",
@@ -61,7 +62,7 @@
     "oxlint": "^1.73.0",
     "prettier": "^3.8.4",
     "secretlint": "^12.2.0",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.12"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -87,10 +88,11 @@
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-metrics": "^2.10.0",
     "@smithy/core": "^3.33.3",
-    "@tanstack/react-query": "^5.101.2",
+    "@tanstack/react-query": "^5.104.5",
     "bedrock-agentcore": "0.4.6",
     "cli-truncate": "^6.1.1",
     "commander": "^15.0.0",
+    "cross-spawn": "^7.0.6",
     "handlebars": "^4.7.10",
     "ink": "^7.1.0",
     "ink-scroll-view": "^0.3.7",
@@ -100,7 +102,7 @@
     "react-router": "^8.3.0",
     "semver": "^7.8.5",
     "smol-toml": "^1.9.1",
-    "string-width": "^8.2.2",
+    "string-width": "^8.3.0",
     "terminal-size": "^4.0.1",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
@@ -109,7 +111,7 @@
     "zod": "^4.4.3"
   },
   "optionalDependencies": {
-    "@napi-rs/keyring": "2.1.1"
+    "@napi-rs/keyring": "2.1.2"
   },
   "overrides": {
     "@opentelemetry/core": "^2.10.0",

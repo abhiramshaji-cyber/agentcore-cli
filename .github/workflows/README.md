@@ -5,9 +5,11 @@
 Workflows are organized into two roles:
 
 ```
-Orchestrators (ci.yml, canary.yml, prerelease.yml, release-prepare.yml,
+Orchestrators (ci.yml, canary.yml, canary-v0.yml, prerelease.yml, release-prepare.yml,
                release-main-and-preview.yml, pr-automation.yml, codeql.yml,
-               slack-pr-review-notification.yml, workflow-metrics.yml)
+               release.yml, slack-issue-notification.yml,
+               slack-open-prs-notification.yml,
+               workflow-metrics.yml)
 Jobs          (verify.yml, e2e-test.yml, generated-artifact-security.yml)
 ```
 
@@ -31,7 +33,13 @@ ci.yml
   `-- e2e-test.yml   (deploys and invokes real AgentCore resources)
 
 canary.yml (scheduled)
-  `-- e2e-test.yml
+  |-- resolves @aws/agentcore@latest and its matching Git tag
+  |-- e2e-test.yml (tests the installed npm package with the tagged test suite)
+  `-- emit-canary-heartbeat.sh
+
+canary-v0.yml (scheduled)
+  |-- runs legacy v0 smoke test
+  `-- emit-canary-heartbeat.sh
 
 release-prepare.yml (version bump, vended CDK pin, release PR)
 
@@ -40,8 +48,9 @@ release-main-and-preview.yml (npm publish and GitHub release when a release PR m
   `-- generated-artifact-security.yml
 ```
 
-`verify.yml` and `e2e-test.yml` each appear in two orchestrators. This is the
-point — write once, compose freely.
+Each reusable job appears in multiple orchestrators. Push CI builds the CLI from
+source for E2E, while the canary installs the resolved npm version. Both use the
+same E2E test runner.
 
 ## Naming Convention
 
@@ -54,8 +63,8 @@ point — write once, compose freely.
 Dispatch `release-prepare` with a bump and a channel, review the release PR it opens, merge it.
 `release-publish` then publishes the merged package.json version.
 
-Publishing listens for pushes to `refactor`, not PR events. It looks up the pushed commit's
-associated PRs and proceeds only when that exact commit
+Publishing listens for pushes to `refactor` and `v1.x`, not PR events. It looks up the pushed
+commit's associated PRs and proceeds only when that exact commit
 is the merge of a `release/v*` PR opened by `agentcore-devx-automation[bot]` (account ID
 `282717993`) from this repository into the target branch. Manually opened release PRs,
 ordinary merges, fork PRs, and pushes without a matching release PR skip verification and
@@ -66,11 +75,11 @@ and `release-main-and-preview.yml` with the `npm-publish` environment as a trust
 job exchanges its GitHub OIDC token for a short-lived npm token. There is no npm secret in the repository.
 npm checks the filename of the top-level workflow and the environment, so the publish step must stay in
 `release-main-and-preview.yml` under `npm-publish` rather than move into a reusable workflow. The name is
-shared with main's release workflow on purpose: each branch runs its own copy.
+shared with the v0 release workflow on `main` (later `v0.x`): each branch runs its own copy.
 
 The prepare job uses `aws-release-4-core`, the check-release and publish jobs use `ubuntu-latest`. The `release-main-and-preview.yml`
-allowlist currently covers `refactor` only. After the workflow lands on `main`, have a
-runner-group administrator add its `main` entry before switching the publish branch filter.
+allowlist currently covers `refactor` only. Have a runner-group administrator allowlist `v1.x`
+before renaming `refactor`.
 The allowlist is scoped to workflow paths and branches; renaming a workflow also requires an
 update. Keep PR-triggered workflows and the verification matrix off this release-only pool.
 
@@ -103,7 +112,8 @@ leakage in downstream steps.
 Every job declares the least privilege it needs. Most only require
 `permissions: { contents: read }`.
 
-### Bun throughout
+### Package managers
 
-All jobs use `oven-sh/setup-bun@v2` and `bun install --frozen-lockfile`. The
-lockfile is enforced to keep CI deterministic.
+V1 builds use `oven-sh/setup-bun@v2` and `bun install --frozen-lockfile`.
+The PR tarball job uses npm for v0 PRs and Bun for v1 PRs, based on the
+checked-out branch's lockfile. Both install paths enforce their lockfile.
