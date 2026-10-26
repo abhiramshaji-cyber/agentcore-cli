@@ -6,11 +6,15 @@ import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { parse } from "yaml";
 import z from "zod";
-import { RUNTIME_TEMPLATE_SHORTCUTS } from "../../src/handlers/project/shortcuts";
+import {
+  RUNTIME_TEMPLATE_SHORTCUT_NAMES,
+  RUNTIME_TEMPLATE_SHORTCUTS,
+  type RuntimeTemplateShortcutName,
+} from "../../src/handlers/project/shortcuts";
 import { CliRunner, parseResult, type RunResult } from "../helpers/run";
 
 type ScanCase = {
-  template: string;
+  template: RuntimeTemplateShortcutName;
   projectName: string;
   container: boolean;
 };
@@ -21,20 +25,20 @@ type VulnerabilityException = {
   expired_at?: unknown;
 };
 
-const SCAN_CASES: readonly ScanCase[] = [
-  { template: "agent-python-minimal", projectName: "ScanPythonMinimal", container: false },
-  { template: "agent-python-strands", projectName: "ScanPythonStrands", container: false },
-  {
-    template: "agent-python-strands-container",
-    projectName: "ScanStrandsContainer",
-    container: true,
+const SCAN_CASES: readonly ScanCase[] = RUNTIME_TEMPLATE_SHORTCUT_NAMES.flatMap(
+  (template, index) => {
+    const metadata = RUNTIME_TEMPLATE_SHORTCUTS[template];
+    return metadata.language === "Python"
+      ? [
+          {
+            template,
+            projectName: `SecurityScan${index}`,
+            container: metadata.build === "Container",
+          },
+        ]
+      : [];
   },
-  { template: "agent-python-langchain", projectName: "ScanPythonLangchain", container: false },
-  { template: "mcp-python-fastmcp", projectName: "ScanPythonFastMcp", container: false },
-  { template: "a2a-python-strands", projectName: "ScanPythonA2a", container: false },
-  { template: "agui-python-strands", projectName: "ScanPythonAgui", container: false },
-  { template: "environment-python-bma", projectName: "ScanPythonBma", container: true },
-] as const;
+);
 
 const ProjectCreatedSchema = z.object({
   project: z.object({ path: z.string() }),
@@ -108,15 +112,7 @@ async function validateExceptions(): Promise<void> {
 describe.runIf(process.platform === "linux")("generated artifact vulnerability scanning", () => {
   const cli = new CliRunner();
 
-  test("matrix covers every supported Python template", () => {
-    const supported = Object.entries(RUNTIME_TEMPLATE_SHORTCUTS)
-      .filter(([, template]) => template.language === "Python")
-      .map(([name]) => name)
-      .sort();
-    expect(SCAN_CASES.map(({ template }) => template).sort()).toEqual(supported);
-  });
-
-  test.each(SCAN_CASES)(
+  test.concurrent.each(SCAN_CASES)(
     "$template",
     { timeout: 15 * 60 * 1000 },
     async ({ template, projectName, container }) => {
