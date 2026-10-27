@@ -13,10 +13,9 @@ export const DEFAULT_DEPLOY_ATTRS = {
   policy_engine_count: 0,
   policy_count: 0,
   deploy_mode: 'deploy' as DeployMode,
-  is_express: false,
 };
 
-export function computeDeployAttrs(projectSpec: Partial<AgentCoreProjectSpec>, mode: DeployMode, express = false) {
+export function computeDeployAttrs(projectSpec: Partial<AgentCoreProjectSpec>, mode: DeployMode) {
   const gateways = projectSpec.agentCoreGateways ?? [];
   const policyEngines = projectSpec.policyEngines ?? [];
   return {
@@ -31,6 +30,5 @@ export function computeDeployAttrs(projectSpec: Partial<AgentCoreProjectSpec>, m
     policy_engine_count: policyEngines.length,
     policy_count: policyEngines.reduce((sum, pe) => sum + (pe.policies ?? []).length, 0),
     deploy_mode: mode,
-    is_express: express,
   };
 }

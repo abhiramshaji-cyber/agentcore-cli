@@ -33,8 +33,6 @@ interface DeployScreenProps {
   preSynthesized?: PreSynthesized;
   /** Run CDK diff instead of deploying */
   diffMode?: boolean;
-  /** Deploy with CloudFormation Express mode */
-  express?: boolean;
 }
 
 /** Next steps shown after successful deployment */
@@ -58,7 +56,6 @@ export function DeployScreen({
   onNavigate,
   preSynthesized,
   diffMode,
-  express,
 }: DeployScreenProps) {
   const { stdout } = useStdout();
   const awsConfig = useAwsTargetConfig();
@@ -109,7 +106,7 @@ export function DeployScreen({
     useEnvLocalCredentials,
     useManualCredentials,
     skipCredentials,
-  } = useDeployFlow({ preSynthesized, isInteractive, diffMode, express, selectedTargets });
+  } = useDeployFlow({ preSynthesized, isInteractive, diffMode, selectedTargets });
   const allSuccess = !hasError && isComplete;
   const skipPreflight = !!preSynthesized;
 

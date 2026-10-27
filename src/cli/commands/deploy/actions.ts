@@ -83,7 +83,6 @@ export interface ValidatedDeployOptions {
   verbose?: boolean;
   plan?: boolean;
   diff?: boolean;
-  express?: boolean;
   onProgress?: (step: string, status: 'start' | 'success' | 'error' | 'warn') => void;
   onResourceEvent?: (message: string) => void;
   onDeployMessage?: (message: DeployMessage) => void;
@@ -169,14 +168,9 @@ export async function runDiff(
   diffIoHost.setOnRawMessage(null);
 }
 
-export async function runDeploy(
-  toolkitWrapper: CdkToolkitWrapper,
-  stackName: string,
-  express?: boolean
-): Promise<void> {
+export async function runDeploy(toolkitWrapper: CdkToolkitWrapper, stackName: string): Promise<void> {
   await toolkitWrapper.deploy({
     stacks: { strategy: StackSelectionStrategy.PATTERN_MUST_MATCH, patterns: [stackName] },
-    express,
   });
 }
 
@@ -590,7 +584,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       switchableIoHost.setVerbose(true);
     }
 
-    await runDeploy(toolkitWrapper, stackName, options.express);
+    await runDeploy(toolkitWrapper, stackName);
 
     // Disable verbose output
     if (switchableIoHost) {

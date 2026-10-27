@@ -15,7 +15,6 @@ describe('deploy --help', () => {
     expect(result.stdout.includes('--verbose')).toBeTruthy();
     expect(result.stdout.includes('--json')).toBeTruthy();
     expect(result.stdout.includes('--dry-run')).toBeTruthy();
-    expect(result.stdout.includes('--express')).toBeTruthy();
     expect(result.stdout.includes('resource-level'), 'Should describe resource-level events').toBeTruthy();
   });
 });
@@ -196,22 +195,18 @@ describe('runDiff', () => {
 });
 
 describe('runDeploy', () => {
-  it.each([undefined, true])(
-    'passes stack selection pattern and express=%s to toolkit wrapper deploy',
-    async express => {
-      let captured: unknown;
-      const fakeWrapper = {
-        deploy: (opts?: unknown) => {
-          captured = opts;
-        },
-      };
+  it('passes stack selection pattern to toolkit wrapper deploy', async () => {
+    let captured: unknown;
+    const fakeWrapper = {
+      deploy: (opts?: unknown) => {
+        captured = opts;
+      },
+    };
 
-      await runDeploy(fakeWrapper as any, 'AgentCore-myapp-prod', express);
+    await runDeploy(fakeWrapper as any, 'AgentCore-myapp-prod');
 
-      expect(captured).toEqual({
-        stacks: { strategy: StackSelectionStrategy.PATTERN_MUST_MATCH, patterns: ['AgentCore-myapp-prod'] },
-        express,
-      });
-    }
-  );
+    expect(captured).toEqual({
+      stacks: { strategy: StackSelectionStrategy.PATTERN_MUST_MATCH, patterns: ['AgentCore-myapp-prod'] },
+    });
+  });
 });

@@ -130,16 +130,8 @@ function makePreflight(opts: {
 // Harness component: mounts the hook so its effects fire under ink-testing-library. onState (when
 // provided) captures the latest hook state each render so tests can assert user-facing output
 // (deployOutput / deployNotes) after the flow settles.
-function Harness({
-  selectedTargets,
-  express,
-  onState,
-}: {
-  selectedTargets?: any[];
-  express?: boolean;
-  onState?: (state: any) => void;
-}) {
-  const state = useDeployFlow({ isInteractive: true, selectedTargets, express });
+function Harness({ selectedTargets, onState }: { selectedTargets?: any[]; onState?: (state: any) => void }) {
+  const state = useDeployFlow({ isInteractive: true, selectedTargets });
   onState?.(state);
   return null as unknown as React.ReactElement;
 }
@@ -307,17 +299,6 @@ describe('useDeployFlow target scoping (issue #1267)', () => {
     expect(deploySpy).toHaveBeenCalledTimes(1);
     const arg = deploySpy.mock.calls[0]![0];
     expect(arg.stacks).toBeUndefined();
-  });
-
-  it.each([undefined, true])('passes express=%s through to the toolkit deploy', async express => {
-    preflightState = makePreflight({ awsTargets: [TARGET_A] });
-
-    const { unmount } = render(<Harness selectedTargets={[TARGET_A]} express={express} />);
-    await flush();
-    unmount();
-
-    expect(deploySpy).toHaveBeenCalledTimes(1);
-    expect(deploySpy.mock.calls[0]![0].express).toBe(express);
   });
 
   it('empty picker selection fails safe (scoped to nothing), never ALL_STACKS (#1267)', async () => {

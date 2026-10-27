@@ -34,10 +34,8 @@ describe('checkStackStatus', () => {
     expect(result.status).toBe('CREATE_COMPLETE');
   });
 
-  it('returns canDeploy true for UPDATE_COMPLETE', async () => {
-    mockSend.mockResolvedValue({
-      Stacks: [{ StackStatus: 'UPDATE_COMPLETE' }],
-    });
+  it.each(['UPDATE_COMPLETE', 'CREATE_FAILED', 'UPDATE_FAILED'])('returns canDeploy true for %s', async status => {
+    mockSend.mockResolvedValue({ Stacks: [{ StackStatus: status }] });
 
     const result = await checkStackStatus('us-east-1', 'MyStack');
     expect(result.canDeploy).toBe(true);
@@ -63,7 +61,7 @@ describe('checkStackStatus', () => {
   });
 
   it('returns canDeploy false for failed status', async () => {
-    const failedStatuses = ['CREATE_FAILED', 'ROLLBACK_FAILED', 'DELETE_FAILED', 'UPDATE_ROLLBACK_FAILED'];
+    const failedStatuses = ['ROLLBACK_FAILED', 'DELETE_FAILED', 'UPDATE_ROLLBACK_FAILED'];
 
     for (const status of failedStatuses) {
       mockSend.mockResolvedValue({ Stacks: [{ StackStatus: status }] });

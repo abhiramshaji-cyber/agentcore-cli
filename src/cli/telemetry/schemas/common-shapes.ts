@@ -181,7 +181,6 @@ export const ATTRIBUTES = {
   authorizer_type: AuthorizerType,
   build_type: BuildType,
   is_dry_run: z.boolean(),
-  is_express: z.boolean(),
   credential_count: Count,
   credential_type: CredentialType,
   deploy_mode: DeployModeSchema,

@@ -85,8 +85,6 @@ interface DeployFlowOptions {
   isInteractive?: boolean;
   /** Run CDK diff instead of deploy */
   diffMode?: boolean;
-  /** Deploy with CloudFormation Express mode */
-  express?: boolean;
   /**
    * Targets the user chose in the multi-select picker. The vended CDK app synthesizes one stack
    * per configured target, so without scoping the deploy runs against ALL_STACKS (every target).
@@ -159,7 +157,7 @@ function withDepSyncAttrs<T extends object>(attrs: T, sync: DependencySyncResult
 }
 
 export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState {
-  const { preSynthesized, isInteractive = false, diffMode = false, express, selectedTargets } = options;
+  const { preSynthesized, isInteractive = false, diffMode = false, selectedTargets } = options;
   const skipPreflight = !!preSynthesized;
 
   // Create logger once for the entire deploy flow
@@ -780,7 +778,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     if (preflight.phase === 'error') {
       const error = preflight.lastError ?? new Error('Preflight failed');
       const attrs = withDepSyncAttrs(
-        computeDeployAttrs(context?.projectSpec ?? {}, 'deploy', express),
+        context ? computeDeployAttrs(context.projectSpec, 'deploy') : { ...DEFAULT_DEPLOY_ATTRS },
         preflight.dependencySyncResult
       );
       withCommandRunTelemetry('deploy', attrs, () => ({ success: false as const, error })).catch(() => {
@@ -793,7 +791,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     if (!cdkToolkitWrapper) return;
 
     const attrs = withDepSyncAttrs(
-      computeDeployAttrs(context?.projectSpec ?? {}, 'deploy', express),
+      context ? computeDeployAttrs(context.projectSpec, 'deploy') : { ...DEFAULT_DEPLOY_ATTRS },
       preflight.dependencySyncResult
     );
 
@@ -882,7 +880,7 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         // Output goes to stdout via the switchable ioHost.
         // deployStacks restricts the deploy to the picker's selected targets; undefined (single
         // target or plan path) lets the assembly's lone stack deploy as before.
-        await cdkToolkitWrapper.deploy({ stacks: deployStacks, express });
+        await cdkToolkitWrapper.deploy({ stacks: deployStacks });
 
         // CDK deploy itself is done. Mark "Deploy to AWS" success and let post-deploy
         // phases (persist, hydrate KBs, auto-ingest, dataset sync, online evals,
@@ -1070,7 +1068,6 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
     activeTarget,
     diffMode,
     deployStacks,
-    express,
   ]);
 
   // Start diff when preflight completes (diff mode only)

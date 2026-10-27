@@ -26,7 +26,6 @@ describe('computeDeployAttrs', () => {
       policy_engine_count: 2,
       policy_count: 3,
       deploy_mode: 'diff',
-      is_express: false,
     });
   });
 
@@ -43,7 +42,6 @@ describe('computeDeployAttrs', () => {
       policy_engine_count: 0,
       policy_count: 0,
       deploy_mode: 'deploy',
-      is_express: false,
     });
   });
 
@@ -54,9 +52,5 @@ describe('computeDeployAttrs', () => {
     expect(attrs.runtime_count).toBe(1);
     expect(attrs.memory_count).toBe(0);
     expect(attrs.deploy_mode).toBe('dry-run');
-  });
-
-  it('records express mode', () => {
-    expect(computeDeployAttrs({}, 'deploy', true).is_express).toBe(true);
   });
 });

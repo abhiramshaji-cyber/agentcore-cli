@@ -20,10 +20,10 @@ const IN_PROGRESS_STATUSES = new Set([
 
 /**
  * CloudFormation stack statuses that indicate the stack is in a failed state
- * and may require manual intervention.
+ * and may require manual intervention. CREATE_FAILED and UPDATE_FAILED are absent because
+ * deploys run in Express mode with rollback disabled, and CloudFormation accepts updates from both.
  */
 const FAILED_STATUSES = new Set([
-  'CREATE_FAILED',
   'ROLLBACK_FAILED',
   'DELETE_FAILED',
   'UPDATE_ROLLBACK_FAILED',
