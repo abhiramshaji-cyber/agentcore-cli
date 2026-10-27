@@ -9,6 +9,7 @@
  *   - AWS credentials
  *   - npm, git, uv installed
  */
+import { NOT_FOUND_STATUS, TERMINAL_STATUSES } from '../src/cli/operations/jobs/index.js';
 import { parseJsonOutput, retry } from '../src/test-utils/index.js';
 import {
   baseCanRun,
@@ -27,7 +28,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const canRun = baseCanRun && hasAws;
-const jobWaitTimeoutMs = 480000;
+const jobWaitTimeoutMs = 300000;
 const jobPollIntervalMs = 10000;
 
 describe.sequential('e2e: archive command lifecycle', () => {
@@ -38,7 +39,7 @@ describe.sequential('e2e: archive command lifecycle', () => {
   // IDs captured from run steps and used in archive steps
   let batchEvaluationId: string;
   let recommendationId: string;
-  let batchEvaluationReady = false;
+  let batchEvaluationArchivable = false;
   let batchEvaluationArchived = false;
   let recommendationArchived = false;
 
@@ -81,7 +82,7 @@ describe.sequential('e2e: archive command lifecycle', () => {
 
   const run = (args: string[]) => runAgentCoreCLI(args, projectPath);
 
-  const waitForJob = async (type: 'batch-evaluation' | 'recommendation', id: string, terminalStatuses: string[]) => {
+  const waitForJob = async (type: 'batch-evaluation' | 'recommendation', id: string) => {
     const deadline = Date.now() + jobWaitTimeoutMs;
     let lastStatus = 'unknown';
     let lastError: string | undefined;
@@ -100,7 +101,7 @@ describe.sequential('e2e: archive command lifecycle', () => {
       if (lastError) {
         throw new Error(`${type} ${id} refresh failed: ${lastError} (status: ${lastStatus})`);
       }
-      if (terminalStatuses.includes(lastStatus)) {
+      if (TERMINAL_STATUSES[type].has(lastStatus)) {
         return lastStatus;
       }
 
@@ -180,15 +181,9 @@ describe.sequential('e2e: archive command lifecycle', () => {
         15000
       );
 
-      const status = await waitForJob('batch-evaluation', batchEvaluationId, [
-        'COMPLETED',
-        'COMPLETED_WITH_ERRORS',
-        'FAILED',
-        'STOPPED',
-        'CANCELLED',
-      ]);
+      const status = await waitForJob('batch-evaluation', batchEvaluationId);
+      batchEvaluationArchivable = status !== NOT_FOUND_STATUS;
       expect(['COMPLETED', 'COMPLETED_WITH_ERRORS', 'STOPPED']).toContain(status);
-      batchEvaluationReady = true;
     },
     600000
   );
@@ -271,7 +266,7 @@ describe.sequential('e2e: archive command lifecycle', () => {
   it.skipIf(!canRun)(
     'archives the batch evaluation with --json flag',
     async ctx => {
-      if (!batchEvaluationReady) ctx.skip();
+      if (!batchEvaluationArchivable) ctx.skip();
 
       const result = await run(['archive', 'batch-evaluation', '--id', batchEvaluationId, '--json']);
       expect(result.exitCode, `archive batch-evaluation failed: ${result.stderr}\n${result.stdout}`).toBe(0);
@@ -347,7 +342,8 @@ describe.sequential('e2e: archive command lifecycle', () => {
     'archives the recommendation with --json flag',
     async ctx => {
       if (!recommendationId) ctx.skip();
-      await waitForJob('recommendation', recommendationId, ['COMPLETED', 'FAILED']);
+      const status = await waitForJob('recommendation', recommendationId);
+      expect(['COMPLETED', 'FAILED']).toContain(status);
 
       const result = await run(['archive', 'recommendation', '--id', recommendationId, '--json']);
       expect(result.exitCode, `archive recommendation failed: ${result.stderr}\n${result.stdout}`).toBe(0);
