@@ -9,6 +9,7 @@ export interface DeployOptions {
   json?: boolean;
   plan?: boolean;
   diff?: boolean;
+  express?: boolean;
 }
 
 export type DeployResult = Result<{

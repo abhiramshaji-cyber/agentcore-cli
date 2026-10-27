@@ -18,13 +18,16 @@ vi.mock('@aws-cdk/toolkit-lib', async () => {
 describe('CdkToolkitWrapper.deploy', () => {
   beforeEach(() => deploySpy.mockClear());
 
-  it('always deploys with CloudFormation Express mode', async () => {
+  it.each([
+    { express: undefined, expected: true },
+    { express: false, expected: false },
+  ])('deploys with express=$expected when express is $express', async ({ express, expected }) => {
     const wrapper = new CdkToolkitWrapper({ projectDir: '/tmp/agentcore-cdk', region: 'us-west-2' });
     await wrapper.initialize();
     const stacks = { strategy: StackSelectionStrategy.PATTERN_MUST_MATCH, patterns: ['AgentCore-myapp-default'] };
 
-    await wrapper.deploy({ stacks });
+    await wrapper.deploy({ stacks, express });
 
-    expect(deploySpy).toHaveBeenCalledWith(expect.anything(), { stacks, express: true });
+    expect(deploySpy).toHaveBeenCalledWith(expect.anything(), { stacks, express: expected });
   });
 });
