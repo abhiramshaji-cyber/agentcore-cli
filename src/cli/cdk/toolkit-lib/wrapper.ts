@@ -243,7 +243,9 @@ export class CdkToolkitWrapper {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        return await withErrorContext('deploy', () => toolkit.deploy(source, { stacks: options.stacks }));
+        return await withErrorContext('deploy', () =>
+          toolkit.deploy(source, { stacks: options.stacks, express: options.express })
+        );
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
 

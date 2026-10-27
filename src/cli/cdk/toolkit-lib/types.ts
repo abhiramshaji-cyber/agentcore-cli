@@ -190,7 +190,7 @@ export interface StackSelectionOptions {
   };
 }
 
-export type DeployOptions = StackSelectionOptions;
+export type DeployOptions = StackSelectionOptions & { express?: boolean };
 
 export type DestroyOptions = StackSelectionOptions;
 

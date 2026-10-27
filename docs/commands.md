@@ -118,6 +118,7 @@ agentcore deploy -y                  # Auto-confirm
 agentcore deploy -y -v               # Auto-confirm with verbose output
 agentcore deploy --dry-run           # Preview without deploying
 agentcore deploy --diff              # Show CDK diff without deploying
+agentcore deploy -y --express        # Deploy with CloudFormation Express mode
 agentcore deploy --target staging -y # Deploy to a specific target
 agentcore deploy -y --json           # JSON output
 ```
@@ -129,6 +130,7 @@ agentcore deploy -y --json           # JSON output
 | `-v, --verbose`   | Resource-level deployment events              |
 | `--dry-run`       | Preview deployment without deploying          |
 | `--diff`          | Show CDK diff without deploying               |
+| `--express`       | Deploy with CloudFormation Express mode       |
 | `--json`          | JSON output                                   |
 
 ### status

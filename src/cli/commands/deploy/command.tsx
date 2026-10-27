@@ -15,10 +15,10 @@ import React from 'react';
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-function handleDeployTUI(options: { diffMode?: boolean } = {}): Promise<void> {
+function handleDeployTUI(options: { diffMode?: boolean; express?: boolean } = {}): Promise<void> {
   requireProject();
   return renderTUI({
-    initialRoute: { name: 'deploy', diffMode: options.diffMode },
+    initialRoute: { name: 'deploy', diffMode: options.diffMode, express: options.express },
     enterAltScreen: false,
     actionOnBack: 'exit',
     isInteractive: false,
@@ -40,8 +40,8 @@ async function handleDeployCLI(options: DeployOptions): Promise<void> {
   const mode = options.diff ? 'diff' : options.plan ? 'dry-run' : 'deploy';
   const attrs = await new ConfigIO()
     .readProjectSpec()
-    .then(spec => computeDeployAttrs(spec, mode))
-    .catch(() => ({ ...DEFAULT_DEPLOY_ATTRS, mode }) as const);
+    .then(spec => computeDeployAttrs(spec, mode, options.express))
+    .catch(() => ({ ...DEFAULT_DEPLOY_ATTRS, mode, is_express: options.express ?? false }) as const);
 
   const { deployResult } = await withCommandRunTelemetry('deploy', attrs, async recorder => {
     const result = await executeDeploy(options).catch(
@@ -142,6 +142,7 @@ async function executeDeploy(options: DeployOptions): Promise<DeployResult> {
     verbose: options.verbose ?? options.diff,
     plan: options.plan,
     diff: options.diff,
+    express: options.express,
     onProgress,
     onResourceEvent,
     onNotice,
@@ -220,6 +221,7 @@ export const registerDeploy = (program: Command) => {
     .option('--json', 'Output as JSON [non-interactive]')
     .option('--dry-run', 'Preview deployment without deploying [non-interactive]')
     .option('--diff', 'Show CDK diff without deploying [non-interactive]')
+    .option('--express', 'Deploy with CloudFormation Express mode: faster, skips stabilization and rollback')
     .action(
       async (cliOptions: {
         target?: string;
@@ -228,6 +230,7 @@ export const registerDeploy = (program: Command) => {
         json?: boolean;
         dryRun?: boolean;
         diff?: boolean;
+        express?: boolean;
       }) => {
         try {
           requireProject();
@@ -247,7 +250,7 @@ export const registerDeploy = (program: Command) => {
             await handleDeployTUI({ diffMode: true });
           } else {
             requireTTY();
-            await handleDeployTUI();
+            await handleDeployTUI({ express: cliOptions.express });
           }
         } catch (error) {
           if (cliOptions.json) {

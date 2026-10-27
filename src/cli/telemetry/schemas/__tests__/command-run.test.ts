@@ -50,6 +50,7 @@ describe('COMMAND_SCHEMAS', () => {
       policy_engine_count: 0,
       policy_count: 0,
       deploy_mode: 'diff',
+      is_express: true,
     };
     expect(COMMAND_SCHEMAS.deploy.parse(attrs)).toEqual(attrs);
   });
@@ -68,6 +69,7 @@ describe('COMMAND_SCHEMAS', () => {
         policy_engine_count: 0,
         policy_count: 0,
         deploy_mode: 'deploy',
+        is_express: false,
       })
     ).toThrow();
   });
@@ -86,6 +88,7 @@ describe('COMMAND_SCHEMAS', () => {
         policy_engine_count: 0,
         policy_count: 0,
         deploy_mode: 'deploy',
+        is_express: false,
       })
     ).toThrow();
   });
