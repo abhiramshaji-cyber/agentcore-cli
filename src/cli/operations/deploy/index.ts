@@ -84,6 +84,8 @@ export {
   type EnsureManagedDependenciesOptions,
 } from './dependency-sync';
 
+export { EXPRESS_FALLBACK_NOTICE, resolveExpressMode } from './express-mode';
+
 // Managed-memory heads-up (shared by the CLI command + TUI deploy flow + add harness)
 export {
   MANAGED_MEMORY_DEPLOY_NOTICE,

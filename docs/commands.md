@@ -123,15 +123,18 @@ agentcore deploy --target staging -y # Deploy to a specific target
 agentcore deploy -y --json           # JSON output
 ```
 
-| Flag              | Description                                   |
-| ----------------- | --------------------------------------------- |
-| `--target <name>` | Deployment target name (default: `"default"`) |
-| `-y, --yes`       | Auto-confirm prompts                          |
-| `-v, --verbose`   | Resource-level deployment events              |
-| `--dry-run`       | Preview deployment without deploying          |
-| `--diff`          | Show CDK diff without deploying               |
-| `--no-express`    | Deploy without CloudFormation Express mode    |
-| `--json`          | JSON output                                   |
+| Flag              | Description                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--target <name>` | Deployment target name (default: `"default"`)                                                                                                           |
+| `-y, --yes`       | Auto-confirm prompts                                                                                                                                    |
+| `-v, --verbose`   | Resource-level deployment events                                                                                                                        |
+| `--dry-run`       | Preview deployment without deploying                                                                                                                    |
+| `--diff`          | Show CDK diff without deploying                                                                                                                         |
+| `--no-express`    | Deploy without CloudFormation Express mode (Express mode, the default, does not roll back a failed deploy and does not wait for resources to stabilize) |
+| `--json`          | JSON output                                                                                                                                             |
+
+Projects with online eval configs always deploy without Express mode, because an online eval config needs the agent
+runtime log group, which exists only after the runtime finishes starting.
 
 ### status
 

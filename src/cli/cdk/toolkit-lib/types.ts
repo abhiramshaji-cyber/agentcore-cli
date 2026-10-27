@@ -192,6 +192,11 @@ export interface StackSelectionOptions {
 
 export type DeployOptions = StackSelectionOptions & { express?: boolean };
 
+export interface DeployOutcome {
+  /** Express mode only: resources CloudFormation reported complete while they were still stabilizing */
+  stabilizationWarning?: string;
+}
+
 export type DestroyOptions = StackSelectionOptions;
 
 export type DiffOptions = StackSelectionOptions;

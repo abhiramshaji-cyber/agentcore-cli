@@ -1,4 +1,5 @@
 import type { AgentCoreProjectSpec } from '../../../schema';
+import { resolveExpressMode } from '../../operations/deploy/express-mode';
 import type { DeployMode } from '../../telemetry/schemas/common-shapes';
 
 export const DEFAULT_DEPLOY_ATTRS = {
@@ -31,6 +32,6 @@ export function computeDeployAttrs(projectSpec: Partial<AgentCoreProjectSpec>, m
     policy_engine_count: policyEngines.length,
     policy_count: policyEngines.reduce((sum, pe) => sum + (pe.policies ?? []).length, 0),
     deploy_mode: mode,
-    is_express: express,
+    is_express: mode === 'deploy' && resolveExpressMode(projectSpec, express),
   };
 }

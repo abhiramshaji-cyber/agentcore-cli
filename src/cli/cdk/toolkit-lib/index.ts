@@ -4,6 +4,7 @@ export type {
   CdkToolkitWrapperOptions,
   DeployMessage,
   DeployOptions,
+  DeployOutcome,
   DestroyOptions,
   DiffOptions,
   ListOptions,

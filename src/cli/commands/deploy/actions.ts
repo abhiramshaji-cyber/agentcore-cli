@@ -12,7 +12,7 @@ import type { AgentCoreMcpSpec, DeployedState } from '../../../schema';
 import { applyTargetRegionToEnv } from '../../aws';
 import { validateAwsCredentials } from '../../aws/account';
 import { CdkToolkitWrapper, createSwitchableIoHost } from '../../cdk/toolkit-lib';
-import type { DeployMessage, SwitchableIoHost } from '../../cdk/toolkit-lib';
+import type { DeployMessage, DeployOutcome, SwitchableIoHost } from '../../cdk/toolkit-lib';
 import {
   buildDeployedState,
   getStackOutputs,
@@ -35,6 +35,7 @@ import {
 import { getErrorMessage } from '../../errors';
 import { ExecLogger } from '../../logging';
 import {
+  EXPRESS_FALLBACK_NOTICE,
   MANAGED_MEMORY_DEPLOY_NOTICE,
   SYNC_CDK_DEPENDENCIES_STEP,
   assertEnvFileExists,
@@ -53,6 +54,7 @@ import {
   hasIdentityOAuthProviders,
   hasManagedMemoryHarness,
   performStackTeardown,
+  resolveExpressMode,
   setupApiKeyProviders,
   setupOAuth2Providers,
   setupTransactionSearch,
@@ -173,8 +175,8 @@ export async function runDeploy(
   toolkitWrapper: CdkToolkitWrapper,
   stackName: string,
   express?: boolean
-): Promise<void> {
-  await toolkitWrapper.deploy({
+): Promise<DeployOutcome> {
+  return toolkitWrapper.deploy({
     stacks: { strategy: StackSelectionStrategy.PATTERN_MUST_MATCH, patterns: [stackName] },
     express,
   });
@@ -576,6 +578,12 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       options.onNotice?.(MANAGED_MEMORY_DEPLOY_NOTICE);
     }
 
+    const express = resolveExpressMode(context.projectSpec, options.express);
+    if ((options.express ?? true) && !express) {
+      logger.log(EXPRESS_FALLBACK_NOTICE);
+      options.onNotice?.(EXPRESS_FALLBACK_NOTICE);
+    }
+
     // Deploy
     const hasGateways = (mcpSpec?.agentCoreGateways?.length ?? 0) > 0;
     const deployStepName = hasGateways ? 'Deploying gateways...' : 'Deploy to AWS';
@@ -590,7 +598,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
       switchableIoHost.setVerbose(true);
     }
 
-    await runDeploy(toolkitWrapper, stackName, options.express);
+    const { stabilizationWarning } = await runDeploy(toolkitWrapper, stackName, express);
 
     // Disable verbose output
     if (switchableIoHost) {
@@ -998,7 +1006,7 @@ export async function handleDeploy(options: ValidatedDeployOptions): Promise<Dep
     const hasHarnesses = (context.projectSpec.harnesses ?? []).length > 0;
     const hasInvokable = agentNames.length > 0 || hasHarnesses;
     const nextSteps = hasInvokable ? [...AGENT_NEXT_STEPS] : [...MEMORY_ONLY_NEXT_STEPS];
-    const notes: string[] = [...autoPaymentNotices];
+    const notes: string[] = [...autoPaymentNotices, ...(stabilizationWarning ? [stabilizationWarning] : [])];
     const quickCreateAuthorizations = await getQuickCreateConnectorAuthorizations({
       region: target.region,
       projectSpec: context.projectSpec,

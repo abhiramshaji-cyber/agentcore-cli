@@ -1,12 +1,20 @@
-import { CONFIG_DIR } from '../../../lib';
+import { CONFIG_DIR, ConflictError } from '../../../lib';
 import { CDK_APP_ENTRY, CDK_PROJECT_DIR } from '../../constants';
 import { isChangesetInProgressError } from '../../errors';
-import type { CdkToolkitWrapperOptions, DeployOptions, DestroyOptions, DiffOptions, ListOptions } from './types';
+import type {
+  CdkToolkitWrapperOptions,
+  DeployOptions,
+  DeployOutcome,
+  DestroyOptions,
+  DiffOptions,
+  ListOptions,
+} from './types';
 import {
   BaseCredentials,
   BootstrapEnvironments,
   BootstrapStackParameters,
   type ICloudAssemblySource,
+  type IIoHost,
   Toolkit,
 } from '@aws-cdk/toolkit-lib';
 import * as path from 'node:path';
@@ -60,6 +68,7 @@ export class CdkToolkitWrapper {
   private synthResult: SynthResult | null = null;
   private synthesizedAssembly: DisposableAssembly | null = null;
   private synthesizedAssemblyDir: string | null = null;
+  private stabilizationWarning: string | undefined;
 
   constructor(options: CdkToolkitWrapperOptions = {}) {
     this.projectDir = options.projectDir ?? path.join(process.cwd(), CONFIG_DIR, CDK_PROJECT_DIR);
@@ -98,7 +107,7 @@ export class CdkToolkitWrapper {
           : undefined;
 
       this.toolkit = new Toolkit({
-        ioHost: this.options.ioHost,
+        ioHost: this.captureStabilizationWarning(this.options.ioHost),
         sdkConfig,
       });
 
@@ -112,6 +121,17 @@ export class CdkToolkitWrapper {
         },
       });
     });
+  }
+
+  private captureStabilizationWarning(ioHost?: IIoHost): IIoHost | undefined {
+    if (!ioHost) return undefined;
+    return {
+      notify: msg => {
+        if (msg.code === 'CDK_TOOLKIT_W5902') this.stabilizationWarning = msg.message;
+        return ioHost.notify(msg);
+      },
+      requestResponse: msg => ioHost.requestResponse(msg),
+    };
   }
 
   /**
@@ -233,9 +253,10 @@ export class CdkToolkitWrapper {
    * Includes retry logic for transient changeset conflicts that can occur
    * when multiple operations race on the same stack.
    */
-  async deploy(options: DeployOptions = {}) {
+  async deploy(options: DeployOptions = {}): Promise<DeployOutcome> {
     const { toolkit } = this.ensureInitialized();
     const source = await this.getSourceForOperation();
+    this.stabilizationWarning = undefined;
 
     const maxRetries = 3;
     const baseDelayMs = 5000; // 5 seconds base delay
@@ -243,10 +264,19 @@ export class CdkToolkitWrapper {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        return await withErrorContext('deploy', () =>
+        await withErrorContext('deploy', () =>
           toolkit.deploy(source, { stacks: options.stacks, express: options.express ?? true })
         );
+        return { stabilizationWarning: this.stabilizationWarning };
       } catch (err) {
+        if (err instanceof Error && err.name === 'ExpressStackFailPaused') {
+          throw new ConflictError(
+            'The last Express mode deploy of this stack failed, so CloudFormation cannot roll it back or replace ' +
+              'resources until it recovers. Fix the failure and run `agentcore deploy` without --no-express. If the ' +
+              'change replaces a resource, first redeploy the last configuration that worked, then apply the change.',
+            { cause: err }
+          );
+        }
         lastError = err instanceof Error ? err : new Error(String(err));
 
         // Only retry on changeset-in-progress errors

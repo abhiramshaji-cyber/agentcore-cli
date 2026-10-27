@@ -26,7 +26,7 @@ describe('computeDeployAttrs', () => {
       policy_engine_count: 2,
       policy_count: 3,
       deploy_mode: 'diff',
-      is_express: true,
+      is_express: false,
     });
   });
 
@@ -56,7 +56,12 @@ describe('computeDeployAttrs', () => {
     expect(attrs.deploy_mode).toBe('dry-run');
   });
 
-  it('records express mode opt-out', () => {
-    expect(computeDeployAttrs({}, 'deploy', false).is_express).toBe(false);
+  it.each([
+    { mode: 'deploy', spec: {}, express: undefined, expected: true },
+    { mode: 'deploy', spec: {}, express: false, expected: false },
+    { mode: 'deploy', spec: { onlineEvalConfigs: [{}] }, express: undefined, expected: false },
+    { mode: 'dry-run', spec: {}, express: undefined, expected: false },
+  ] as const)('records is_express=$expected for $mode', ({ mode, spec, express, expected }) => {
+    expect(computeDeployAttrs(spec as Partial<AgentCoreProjectSpec>, mode, express).is_express).toBe(expected);
   });
 });

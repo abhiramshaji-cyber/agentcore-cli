@@ -7,7 +7,7 @@ import { renderTUI } from '../../tui';
 import { requireProject, requireTTY } from '../../tui/guards';
 import { handleDeploy } from './actions';
 import type { DeployOptions, DeployResult } from './types';
-import { DEFAULT_DEPLOY_ATTRS, computeDeployAttrs } from './utils';
+import { computeDeployAttrs } from './utils';
 import { validateDeployOptions } from './validate';
 import type { Command } from '@commander-js/extra-typings';
 import { Text, render } from 'ink';
@@ -41,7 +41,7 @@ async function handleDeployCLI(options: DeployOptions): Promise<void> {
   const attrs = await new ConfigIO()
     .readProjectSpec()
     .then(spec => computeDeployAttrs(spec, mode, options.express))
-    .catch(() => ({ ...DEFAULT_DEPLOY_ATTRS, mode, is_express: options.express ?? true }) as const);
+    .catch(() => computeDeployAttrs({}, mode, options.express));
 
   const { deployResult } = await withCommandRunTelemetry('deploy', attrs, async recorder => {
     const result = await executeDeploy(options).catch(

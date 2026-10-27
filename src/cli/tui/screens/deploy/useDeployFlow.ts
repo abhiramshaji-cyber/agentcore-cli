@@ -26,12 +26,14 @@ import { toStackName } from '../../../commands/import/import-utils';
 import { getErrorMessage, isChangesetInProgressError, isExpiredTokenError } from '../../../errors';
 import { ExecLogger } from '../../../logging';
 import {
+  EXPRESS_FALLBACK_NOTICE,
   MANAGED_MEMORY_DEPLOY_NOTICE,
   cleanupPaymentCredentialProviders,
   formatQuickCreateConnectorAuthorization,
   getQuickCreateConnectorAuthorizations,
   hasManagedMemoryHarness,
   performStackTeardown,
+  resolveExpressMode,
   setupTransactionSearch,
   toDepSyncAttrs,
 } from '../../../operations/deploy';
@@ -845,6 +847,12 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         }
       }
 
+      const useExpress = resolveExpressMode(context?.projectSpec ?? {}, express);
+      if ((express ?? true) && !useExpress) {
+        logger.log(EXPRESS_FALLBACK_NOTICE);
+        setDeployNotes(prev => [...prev, EXPRESS_FALLBACK_NOTICE]);
+      }
+
       setPublishAssetsStep(prev => ({ ...prev, status: 'running' }));
       setShouldStartDeploy(false);
       setDeployMessages([]); // Clear previous messages
@@ -882,7 +890,11 @@ export function useDeployFlow(options: DeployFlowOptions = {}): DeployFlowState 
         // Output goes to stdout via the switchable ioHost.
         // deployStacks restricts the deploy to the picker's selected targets; undefined (single
         // target or plan path) lets the assembly's lone stack deploy as before.
-        await cdkToolkitWrapper.deploy({ stacks: deployStacks, express });
+        const { stabilizationWarning } = await cdkToolkitWrapper.deploy({ stacks: deployStacks, express: useExpress });
+        if (stabilizationWarning) {
+          logger.log(stabilizationWarning, 'warn');
+          setDeployNotes(prev => [...prev, stabilizationWarning]);
+        }
 
         // CDK deploy itself is done. Mark "Deploy to AWS" success and let post-deploy
         // phases (persist, hydrate KBs, auto-ingest, dataset sync, online evals,

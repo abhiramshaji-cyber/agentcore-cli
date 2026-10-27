@@ -10,6 +10,7 @@
  * is scoped to ONLY the selected target's stack name via PATTERN_MUST_MATCH.
  */
 import { toStackName } from '../../../../commands/import/import-utils';
+import { EXPRESS_FALLBACK_NOTICE } from '../../../../operations/deploy/express-mode';
 import { useDeployFlow } from '../useDeployFlow';
 import { StackSelectionStrategy } from '@aws-cdk/toolkit-lib';
 import { render } from 'ink-testing-library';
@@ -18,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---- Module mocks -----------------------------------------------------------
 
-const deploySpy = vi.fn().mockResolvedValue(undefined);
+const deploySpy = vi.fn().mockResolvedValue({});
 const diffSpy = vi.fn().mockResolvedValue(undefined);
 const disposeSpy = vi.fn().mockResolvedValue(undefined);
 
@@ -94,13 +95,14 @@ function makePreflight(opts: {
   projectName?: string;
   isFirstDeploy?: boolean;
   isTeardownDeploy?: boolean;
+  onlineEvalConfigs?: { name: string }[];
 }) {
   const stackNames = opts.awsTargets.map(t => toStackName(opts.projectName ?? PROJECT_NAME, t.name));
   return {
     phase: 'complete',
     steps: [],
     context: {
-      projectSpec: { name: opts.projectName ?? PROJECT_NAME, runtimes: [] },
+      projectSpec: { name: opts.projectName ?? PROJECT_NAME, runtimes: [], onlineEvalConfigs: opts.onlineEvalConfigs },
       awsTargets: opts.awsTargets,
       isTeardownDeploy: opts.isTeardownDeploy ?? false,
       // First-deploy skips the pre-deploy diff branch; flip it off to exercise diff scoping.
@@ -309,15 +311,38 @@ describe('useDeployFlow target scoping (issue #1267)', () => {
     expect(arg.stacks).toBeUndefined();
   });
 
-  it.each([undefined, false])('passes express=%s through to the toolkit deploy', async express => {
-    preflightState = makePreflight({ awsTargets: [TARGET_A] });
+  it.each([
+    { express: undefined, onlineEvalConfigs: undefined, expected: true },
+    { express: false, onlineEvalConfigs: undefined, expected: false },
+    { express: undefined, onlineEvalConfigs: [{ name: 'QualityEval' }], expected: false },
+  ])(
+    'deploys with express=$expected for express=$express and onlineEvalConfigs=$onlineEvalConfigs',
+    async ({ express, onlineEvalConfigs, expected }) => {
+      preflightState = makePreflight({ awsTargets: [TARGET_A], onlineEvalConfigs });
 
-    const { unmount } = render(<Harness selectedTargets={[TARGET_A]} express={express} />);
+      let latest: any;
+      const { unmount } = render(
+        <Harness selectedTargets={[TARGET_A]} express={express} onState={s => (latest = s)} />
+      );
+      await flush();
+      unmount();
+
+      expect(deploySpy).toHaveBeenCalledTimes(1);
+      expect(deploySpy.mock.calls[0]![0].express).toBe(expected);
+      expect(latest.deployNotes.includes(EXPRESS_FALLBACK_NOTICE)).toBe(express === undefined && !expected);
+    }
+  );
+
+  it('shows the Express mode stabilization warning as a deploy note', async () => {
+    preflightState = makePreflight({ awsTargets: [TARGET_A] });
+    deploySpy.mockResolvedValueOnce({ stabilizationWarning: 'Runtime ApplicationAgentRuntime is still stabilizing' });
+
+    let latest: any;
+    const { unmount } = render(<Harness selectedTargets={[TARGET_A]} onState={s => (latest = s)} />);
     await flush();
     unmount();
 
-    expect(deploySpy).toHaveBeenCalledTimes(1);
-    expect(deploySpy.mock.calls[0]![0].express).toBe(express);
+    expect(latest.deployNotes).toContain('Runtime ApplicationAgentRuntime is still stabilizing');
   });
 
   it('empty picker selection fails safe (scoped to nothing), never ALL_STACKS (#1267)', async () => {
